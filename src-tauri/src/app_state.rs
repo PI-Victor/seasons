@@ -1,0 +1,177 @@
+use crate::hue::BridgeConnection;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+const APP_DIR_NAME: &str = "seasons";
+const CONFIG_FILE_NAME: &str = "config.json";
+const DATA_FILE_NAME: &str = "state.json";
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveRoomOrderRequest {
+    pub connection: BridgeConnection,
+    pub room_ids: Vec<String>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct AppConfigFile {
+    last_connection: Option<BridgeConnection>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct AppDataFile {
+    room_orders: BTreeMap<String, Vec<String>>,
+}
+
+pub fn load_bridge_connection() -> Result<Option<BridgeConnection>, String> {
+    let config = read_json::<AppConfigFile>(&config_file_path()?)?;
+    Ok(config.last_connection)
+}
+
+pub fn save_bridge_connection(connection: &BridgeConnection) -> Result<(), String> {
+    let mut config = read_json::<AppConfigFile>(&config_file_path()?)?;
+    config.last_connection = Some(connection.clone());
+    write_json(&config_file_path()?, &config)
+}
+
+pub fn clear_bridge_connection() -> Result<(), String> {
+    let mut config = read_json::<AppConfigFile>(&config_file_path()?)?;
+    config.last_connection = None;
+    write_json(&config_file_path()?, &config)
+}
+
+pub fn load_room_order(connection: &BridgeConnection) -> Result<Vec<String>, String> {
+    let data = read_json::<AppDataFile>(&data_file_path()?)?;
+    Ok(data
+        .room_orders
+        .get(&room_order_key(connection))
+        .cloned()
+        .unwrap_or_default())
+}
+
+pub fn save_room_order(request: &SaveRoomOrderRequest) -> Result<(), String> {
+    let mut data = read_json::<AppDataFile>(&data_file_path()?)?;
+    data.room_orders.insert(
+        room_order_key(&request.connection),
+        request.room_ids.clone(),
+    );
+    write_json(&data_file_path()?, &data)
+}
+
+pub fn clear_room_order(connection: &BridgeConnection) -> Result<(), String> {
+    let mut data = read_json::<AppDataFile>(&data_file_path()?)?;
+    data.room_orders.remove(&room_order_key(connection));
+    write_json(&data_file_path()?, &data)
+}
+
+fn config_file_path() -> Result<PathBuf, String> {
+    Ok(config_dir()?.join(CONFIG_FILE_NAME))
+}
+
+fn data_file_path() -> Result<PathBuf, String> {
+    Ok(data_dir()?.join(DATA_FILE_NAME))
+}
+
+fn config_dir() -> Result<PathBuf, String> {
+    resolve_xdg_dir("XDG_CONFIG_HOME", &[".config", APP_DIR_NAME])
+}
+
+fn data_dir() -> Result<PathBuf, String> {
+    resolve_xdg_dir("XDG_DATA_HOME", &[".local", "share", APP_DIR_NAME])
+}
+
+fn resolve_xdg_dir(env_key: &str, fallback_segments: &[&str]) -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os(env_key).filter(|value| !value.is_empty()) {
+        return Ok(PathBuf::from(path).join(APP_DIR_NAME));
+    }
+
+    let Some(home) = std::env::var_os("HOME").filter(|value| !value.is_empty()) else {
+        return Err(format!("{env_key} is not set and HOME is unavailable"));
+    };
+
+    let mut path = PathBuf::from(home);
+    for segment in fallback_segments {
+        path.push(segment);
+    }
+    Ok(path)
+}
+
+fn read_json<T>(path: &Path) -> Result<T, String>
+where
+    T: for<'de> Deserialize<'de> + Default,
+{
+    if !path.exists() {
+        return Ok(T::default());
+    }
+
+    let contents = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+
+    serde_json::from_str(&contents)
+        .map_err(|error| format!("failed to parse {}: {error}", path.display()))
+}
+
+fn write_json<T>(path: &Path, value: &T) -> Result<(), String>
+where
+    T: Serialize,
+{
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+
+    let contents = serde_json::to_string_pretty(value)
+        .map_err(|error| format!("failed to serialize {}: {error}", path.display()))?;
+    fs::write(path, contents)
+        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let permissions = fs::Permissions::from_mode(0o600);
+        fs::set_permissions(path, permissions).map_err(|error| {
+            format!(
+                "failed to update permissions for {}: {error}",
+                path.display()
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+fn room_order_key(connection: &BridgeConnection) -> String {
+    format!(
+        "{}::{}",
+        connection.bridge_ip.trim(),
+        connection.username.trim()
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{room_order_key, AppConfigFile, AppDataFile};
+    use crate::hue::BridgeConnection;
+
+    #[test]
+    fn room_order_key_uses_bridge_and_username() {
+        let connection = BridgeConnection {
+            bridge_ip: "172.16.0.10".to_string(),
+            username: "user-token".to_string(),
+        };
+
+        assert_eq!(room_order_key(&connection), "172.16.0.10::user-token");
+    }
+
+    #[test]
+    fn state_files_default_to_empty() {
+        let config = AppConfigFile::default();
+        let data = AppDataFile::default();
+
+        assert!(config.last_connection.is_none());
+        assert!(data.room_orders.is_empty());
+    }
+}
