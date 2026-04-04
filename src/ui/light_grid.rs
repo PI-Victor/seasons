@@ -5,7 +5,7 @@ use leptos::prelude::*;
 use std::collections::{HashMap, HashSet};
 use wasm_bindgen::{JsCast, JsValue};
 
-use super::{SceneComposer, SceneComposerRequest};
+use super::{DeviceGrid, SceneComposer, SceneComposerRequest};
 
 #[component]
 pub fn LightGrid(
@@ -421,90 +421,13 @@ pub fn LightGrid(
                                                 </div>
 
                                                 <span class="room-strip-label">"Lights"</span>
-                                                <div class="device-list">
-                                                    {room
-                                                        .lights
-                                                        .into_iter()
-                                                        .map(|light| {
-                                                        let placement = derive_placement(&light.id, &groups.get());
-                                                        let light_name = light.name.clone();
-                                                        let light_type = light
-                                                            .light_type
-                                                            .clone()
-                                                            .unwrap_or_else(|| "Hue light".to_string());
-                                                        let reachable_text = if light.reachable.unwrap_or(true) {
-                                                            "Reachable"
-                                                        } else {
-                                                            "Unavailable"
-                                                        };
-                                                        let light_title = light_name.clone();
-                                                        let is_on = light.is_on.unwrap_or(false);
-                                                        let brightness_text = brightness_label(light.brightness.unwrap_or(0));
-                                                        let brightness_value = light.brightness.unwrap_or(1).max(1);
-                                                        let light_style = light_accent_style(&light).unwrap_or_default();
-                                                        let toggle_light_id = light.id.clone();
-                                                        let set_light_brightness_id = light.id.clone();
-                                                        let is_pending = pending_light_ids.get().contains(&light.id);
-                                                        let light_icon_class = device_icon_class(&light);
-                                                        let zone_text = if placement.zone_names.is_empty() {
-                                                            "No zones".to_string()
-                                                        } else {
-                                                            placement.zone_names.join(", ")
-                                                        };
-
-                                                        view! {
-                                                            <article class="light-card compact-light-card" style=light_style>
-                                                                <div class="light-card-top">
-                                                                    <div class="light-card-identity">
-                                                                        <span class="light-icon-shell">
-                                                                            <span class=format!("{light_icon_class} fa-fw light-icon-glyph") aria-hidden="true"></span>
-                                                                        </span>
-                                                                        <div class="light-card-copy">
-                                                                        <p class="light-eyebrow">{light_type}</p>
-                                                                        <h3 title=light_title>{light_name}</h3>
-                                                                        <p class="light-subcopy">{zone_text}</p>
-                                                                        </div>
-                                                                    </div>
-                                                                    <button
-                                                                        class="light-status-button"
-                                                                        class:is-off=move || !is_on
-                                                                        disabled=is_pending
-                                                                        on:click=move |_| on_toggle_light.run(toggle_light_id.clone())
-                                                                    >
-                                                                        <span class="status-dot"></span>
-                                                                        <span>{if is_on { "On" } else { "Off" }}</span>
-                                                                    </button>
-                                                                </div>
-
-                                                                <div class="light-meta-cluster">
-                                                                    <span class="light-meta-chip">{brightness_text.clone()}</span>
-                                                                    <span class="light-meta-chip">{reachable_text}</span>
-                                                                </div>
-
-                                                                <div class="device-inline-control">
-                                                                    <div class="device-inline-copy">
-                                                                        <span class="device-inline-label">"Brightness"</span>
-                                                                        <strong>{brightness_text}</strong>
-                                                                    </div>
-                                                                    <input
-                                                                        class="brightness-slider device-brightness-slider"
-                                                                        type="range"
-                                                                        min="1"
-                                                                        max="254"
-                                                                        value=brightness_value.to_string()
-                                                                        disabled=is_pending || !light.reachable.unwrap_or(true)
-                                                                        on:change=move |ev| {
-                                                                            if let Ok(value) = event_target_value(&ev).parse::<u8>() {
-                                                                                on_set_light_brightness.run((set_light_brightness_id.clone(), value));
-                                                                            }
-                                                                        }
-                                                                    />
-                                                                </div>
-                                                            </article>
-                                                        }
-                                                        })
-                                                        .collect_view()}
-                                                </div>
+                                                <DeviceGrid
+                                                    lights=room.lights
+                                                    groups=groups.get()
+                                                    pending_light_ids=pending_light_ids
+                                                    on_toggle_light=on_toggle_light
+                                                    on_set_light_brightness=on_set_light_brightness
+                                                />
                                             </div>
                                         </details>
                                     }
@@ -528,11 +451,6 @@ struct RoomSection {
     average_brightness: u8,
     lights: Vec<Light>,
     scenes: Vec<Scene>,
-}
-
-#[derive(Default)]
-struct LightPlacement {
-    zone_names: Vec<String>,
 }
 
 fn build_room_sections(lights: &[Light], groups: &[Group], scenes: &[Scene]) -> Vec<RoomSection> {
@@ -657,23 +575,6 @@ fn reorder_room_ids(current_order: &[String], source_id: &str, target_id: &str) 
     reordered
 }
 
-fn derive_placement(light_id: &str, groups: &[Group]) -> LightPlacement {
-    let mut placement = LightPlacement::default();
-
-    for group in groups {
-        if !group.light_ids.iter().any(|id| id == light_id) {
-            continue;
-        }
-
-        if matches!(group.kind, GroupKind::Zone) {
-            placement.zone_names.push(group.name.clone());
-        }
-    }
-
-    placement.zone_names.sort();
-    placement
-}
-
 fn brightness_label(value: u8) -> String {
     let percentage = (u16::from(value) * 100) / 254;
     format!("{percentage}%")
@@ -722,10 +623,6 @@ fn room_accent_style(lights: &[Light]) -> Option<String> {
     average_accent_color(lights).map(|color| format!("--bridge-accent: {color};"))
 }
 
-fn light_accent_style(light: &Light) -> Option<String> {
-    light_accent_color(light).map(|color| format!("--bridge-accent: {color};"))
-}
-
 fn average_accent_color(lights: &[Light]) -> Option<String> {
     let preferred_lights: Vec<&Light> = lights
         .iter()
@@ -766,10 +663,6 @@ fn average_accent_color(lights: &[Light]) -> Option<String> {
     ))
 }
 
-fn light_accent_color(light: &Light) -> Option<String> {
-    light_accent_rgb(light).map(|(red, green, blue)| format!("rgb({red} {green} {blue})"))
-}
-
 fn light_accent_rgb(light: &Light) -> Option<(u8, u8, u8)> {
     let brightness = light.brightness?;
     if brightness == 0 {
@@ -785,22 +678,6 @@ fn light_accent_rgb(light: &Light) -> Option<(u8, u8, u8)> {
     let hue = light.hue.unwrap_or(8_000);
     let saturation = light.saturation.unwrap_or(40);
     Some(hsv_to_ui_rgb(hue, saturation, brightness))
-}
-
-fn device_icon_class(light: &Light) -> &'static str {
-    let light_type = light
-        .light_type
-        .as_deref()
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-
-    if light_type.contains("strip") {
-        "fa-solid fa-grip-lines-vertical"
-    } else if light_type.contains("plug") {
-        "fa-solid fa-plug"
-    } else {
-        "fa-solid fa-lightbulb"
-    }
 }
 
 fn hsv_to_ui_rgb(hue: u16, saturation: u8, brightness: u8) -> (u8, u8, u8) {

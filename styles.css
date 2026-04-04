@@ -132,6 +132,30 @@ input {
   gap: 10px;
 }
 
+.nav-button-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.topbar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 1 1 auto;
+}
+
+.nav-button.is-active {
+  border-color: color-mix(in srgb, var(--amber) 34%, var(--ghost-border));
+  background: color-mix(in srgb, var(--amber) 14%, var(--ghost-bg));
+  color: var(--text);
+}
+
+.topbar-quit {
+  margin-left: auto;
+}
+
 .topbar-brand {
   display: flex;
   flex-direction: column;
@@ -615,6 +639,49 @@ input {
   box-shadow: 0 0 0 10px color-mix(in srgb, var(--lime) 12%, transparent);
 }
 
+.audio-sync-summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.audio-sync-summary::-webkit-details-marker {
+  display: none;
+}
+
+.audio-sync-summary-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.audio-sync-summary-toggle {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.7rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  background: var(--ghost-bg);
+  color: var(--text-soft);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.audio-sync-panel[open] .audio-sync-summary-toggle {
+  font-size: 0;
+  color: var(--text);
+}
+
+.audio-sync-panel[open] .audio-sync-summary-toggle::after {
+  content: "Close";
+  font-size: 0.74rem;
+}
+
+.audio-sync-body {
+  display: grid;
+  gap: 14px;
+  padding-top: 10px;
+}
+
 .bridge-subsection {
   display: grid;
   gap: 14px;
@@ -730,12 +797,14 @@ input {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: nowrap;
 }
 
 .room-card-tools {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: 0 0 auto;
 }
 
 .room-summary-main {
@@ -743,6 +812,7 @@ input {
   align-items: center;
   gap: 12px;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .room-drag-handle {
@@ -868,6 +938,56 @@ input {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.entertainment-area-strip {
+  display: grid;
+  gap: 10px;
+  padding: 2px 2px 6px;
+}
+
+.entertainment-area-header h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.entertainment-area-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.entertainment-area-chip {
+  display: inline-grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 0.6rem 0.8rem;
+  border-radius: 14px;
+  border: 1px solid var(--pill-border);
+  background: var(--pill-bg);
+  color: var(--text);
+  text-align: left;
+}
+
+.entertainment-area-chip strong {
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.entertainment-area-chip small {
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  line-height: 1.15;
+}
+
+.entertainment-area-chip.is-selected {
+  border-color: color-mix(in srgb, var(--bridge-accent, var(--amber)) 55%, var(--pill-border));
+  background: color-mix(in srgb, var(--bridge-accent, var(--amber)) 14%, var(--pill-bg));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bridge-accent, var(--amber)) 18%, transparent);
 }
 
 .home-master-switch {
@@ -1322,6 +1442,154 @@ input {
   gap: 10px;
 }
 
+.devices-panel-header {
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.device-type-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.device-type-section {
+  display: grid;
+  gap: 10px;
+}
+
+.device-type-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.device-type-count {
+  color: var(--text-soft);
+  font-size: 0.76rem;
+}
+
+.sensor-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 156px);
+  gap: 10px;
+}
+
+.automation-stack {
+  display: grid;
+  gap: 14px;
+}
+
+.automation-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.automation-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, white 4%, transparent), transparent 32%),
+    color-mix(in srgb, var(--bg-card) 96%, transparent);
+}
+
+.automation-card-button {
+  cursor: pointer;
+}
+
+.automation-card-button.is-selected {
+  border-color: color-mix(in srgb, var(--amber) 42%, var(--line));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 6%, transparent),
+    0 10px 28px rgba(0, 0, 0, 0.18);
+}
+
+.automation-card-top {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.automation-card-identity {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+
+.automation-icon-shell {
+  color: var(--text);
+}
+
+.automation-detail-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--amber) 26%, var(--line));
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--amber) 6%, transparent), transparent 34%),
+    color-mix(in srgb, var(--bg-card) 97%, transparent);
+}
+
+.automation-detail-top {
+  align-items: center;
+}
+
+.automation-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.automation-detail-sections {
+  display: grid;
+  gap: 12px;
+}
+
+.automation-detail-block {
+  display: grid;
+  gap: 8px;
+}
+
+.automation-json {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  color: var(--text);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  font-family:
+    "Iosevka",
+    "SFMono-Regular",
+    "JetBrains Mono",
+    monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+  max-height: 320px;
+}
+
+.sensor-card {
+  min-height: 148px;
+}
+
+.sensor-icon-shell {
+  color: var(--text);
+}
+
+.compact-empty-state {
+  margin-top: 10px;
+}
+
 .light-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -1647,8 +1915,6 @@ input {
 
   .panel-header,
   .panel-action-row,
-  .room-card-header,
-  .room-card-tools,
   .room-strip-header,
   .light-card-top,
   .brightness-header,
@@ -1663,6 +1929,18 @@ input {
     flex-wrap: wrap;
   }
 
+  .topbar-toolbar {
+    width: 100%;
+  }
+
+  .devices-panel-header {
+    align-items: start;
+  }
+
+  .devices-panel-header .panel-copy {
+    margin-top: 0;
+  }
+
   .device-inline-control {
     grid-template-columns: 1fr;
     align-items: stretch;
@@ -1673,6 +1951,11 @@ input {
   }
 
   .device-list,
+  .sensor-list {
+    grid-template-columns: repeat(3, 156px);
+    justify-content: start;
+  }
+
   .light-grid {
     grid-template-columns: 1fr;
   }
@@ -1688,5 +1971,68 @@ input {
 
   .scene-thumb-art {
     height: 40px;
+  }
+}
+
+@media (max-width: 560px) {
+  .device-list,
+  .sensor-list {
+    grid-template-columns: repeat(2, 156px);
+  }
+}
+
+@media (max-width: 420px) {
+  .device-list,
+  .sensor-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .topbar-toolbar {
+    width: 100%;
+  }
+
+  .topbar-actions {
+    flex-wrap: wrap;
+  }
+
+  .room-card-summary {
+    padding: 12px 12px 10px;
+  }
+
+  .room-card-header {
+    align-items: flex-start;
+    flex-wrap: nowrap;
+    gap: 10px;
+  }
+
+  .room-card-tools {
+    align-items: flex-end;
+    gap: 8px;
+  }
+
+  .room-meta {
+    gap: 6px;
+    justify-content: flex-end;
+  }
+
+  .room-meta span {
+    min-height: 1.5rem;
+    padding: 0.12rem 0.52rem;
+    font-size: 0.7rem;
+  }
+
+  .room-summary-copy h3 {
+    font-size: 0.98rem;
+  }
+
+  .room-summary-copy p {
+    font-size: 0.74rem;
   }
 }

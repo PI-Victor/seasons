@@ -63,6 +63,34 @@ pub struct EntertainmentPosition {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct Automation {
+    pub id: String,
+    pub name: String,
+    pub enabled: Option<bool>,
+    pub script_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationDetail {
+    pub id: String,
+    pub name: String,
+    pub enabled: Option<bool>,
+    pub script_id: Option<String>,
+    pub instance_json: String,
+    pub script_json: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SetAutomationEnabledRequest {
+    pub connection: BridgeConnection,
+    pub automation_id: String,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct AudioSyncStartRequest {
     pub connection: BridgeConnection,
     pub entertainment_area_id: String,
@@ -141,6 +169,19 @@ pub struct Light {
     pub reachable: Option<bool>,
     pub light_type: Option<String>,
     pub model_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Sensor {
+    pub id: String,
+    pub name: String,
+    pub sensor_type: Option<String>,
+    pub model_id: Option<String>,
+    pub reachable: Option<bool>,
+    pub battery: Option<u8>,
+    pub last_updated: Option<String>,
+    pub summary: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -274,6 +315,19 @@ pub(crate) struct RawHueLightState {
     pub reachable: Option<bool>,
 }
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawHueSensor {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub sensor_type: Option<String>,
+    #[serde(default)]
+    pub modelid: Option<String>,
+    #[serde(default)]
+    pub state: Value,
+    #[serde(default)]
+    pub config: Value,
+}
+
 impl From<(String, RawHueLight)> for Light {
     fn from((id, raw): (String, RawHueLight)) -> Self {
         Self {
@@ -287,6 +341,29 @@ impl From<(String, RawHueLight)> for Light {
             reachable: raw.state.reachable,
             light_type: raw.light_type,
             model_id: raw.modelid,
+        }
+    }
+}
+
+impl From<(String, RawHueSensor)> for Sensor {
+    fn from((id, raw): (String, RawHueSensor)) -> Self {
+        Self {
+            id,
+            name: raw.name,
+            sensor_type: raw.sensor_type,
+            model_id: raw.modelid,
+            reachable: raw.config.get("reachable").and_then(Value::as_bool),
+            battery: raw
+                .config
+                .get("battery")
+                .and_then(Value::as_u64)
+                .and_then(|value| u8::try_from(value).ok()),
+            last_updated: raw
+                .state
+                .get("lastupdated")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned),
+            summary: sensor_summary(&raw.state),
         }
     }
 }
@@ -388,6 +465,7 @@ impl HueLightStatePayload {
 }
 
 pub(crate) type RawLightsResponse = BTreeMap<String, RawHueLight>;
+pub(crate) type RawSensorsResponse = BTreeMap<String, RawHueSensor>;
 pub(crate) type RawGroupsResponse = BTreeMap<String, RawHueGroup>;
 pub(crate) type RawScenesResponse = BTreeMap<String, RawHueScene>;
 pub(crate) type RawSceneDetailResponse = RawHueSceneDetail;
@@ -454,6 +532,37 @@ pub(crate) struct RawEntertainmentPosition {
     pub z: f32,
 }
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawAutomation {
+    pub id: String,
+    pub metadata: RawAutomationMetadata,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub script_id: Option<RawClipV2ResourceIdentifier>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawAutomationMetadata {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawClipV2ResourceIdentifier {
+    pub rid: String,
+}
+
+impl From<RawAutomation> for Automation {
+    fn from(raw: RawAutomation) -> Self {
+        Self {
+            id: raw.id,
+            name: raw.metadata.name,
+            enabled: raw.enabled,
+            script_id: raw.script_id.map(|script| script.rid),
+        }
+    }
+}
+
 impl From<RawEntertainmentArea> for EntertainmentArea {
     fn from(raw: RawEntertainmentArea) -> Self {
         Self {
@@ -493,11 +602,52 @@ fn default_inactive_status() -> String {
     "inactive".to_string()
 }
 
+fn sensor_summary(state: &Value) -> Option<String> {
+    if let Some(presence) = state.get("presence").and_then(Value::as_bool) {
+        return Some(if presence {
+            "Motion detected".to_string()
+        } else {
+            "No motion".to_string()
+        });
+    }
+
+    if let Some(temperature) = state.get("temperature").and_then(Value::as_i64) {
+        return Some(format!("{:.1}°C", temperature as f32 / 100.0));
+    }
+
+    if let Some(daylight) = state.get("daylight").and_then(Value::as_bool) {
+        return Some(if daylight {
+            "Daylight".to_string()
+        } else {
+            "No daylight".to_string()
+        });
+    }
+
+    if let Some(dark) = state.get("dark").and_then(Value::as_bool) {
+        return Some(if dark {
+            "Dark".to_string()
+        } else {
+            "Bright".to_string()
+        });
+    }
+
+    if let Some(lightlevel) = state.get("lightlevel").and_then(Value::as_i64) {
+        return Some(format!("Light level {lightlevel}"));
+    }
+
+    if let Some(button_event) = state.get("buttonevent").and_then(Value::as_i64) {
+        return Some(format!("Button event {button_event}"));
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        CreateUserSuccessPayload, Group, GroupKind, HueApiResponse, HueLightStatePayload, Light,
-        LightStateUpdate, RawGroupsResponse, RawLightsResponse, RawScenesResponse, Scene,
+        Automation, ClipV2ListResponse, CreateUserSuccessPayload, Group, GroupKind, HueApiResponse,
+        HueLightStatePayload, Light, LightStateUpdate, RawAutomation, RawGroupsResponse,
+        RawLightsResponse, RawScenesResponse, RawSensorsResponse, Scene, Sensor,
     };
 
     #[test]
@@ -600,6 +750,34 @@ mod tests {
     }
 
     #[test]
+    fn converts_raw_sensors_to_public_models() {
+        let raw = r#"{
+            "12": {
+                "name": "Hall motion",
+                "type": "ZLLPresence",
+                "modelid": "SML001",
+                "state": {
+                    "presence": true,
+                    "lastupdated": "2026-04-04T14:00:00"
+                },
+                "config": {
+                    "reachable": true,
+                    "battery": 87
+                }
+            }
+        }"#;
+
+        let response: RawSensorsResponse = serde_json::from_str(raw).unwrap();
+        let sensors: Vec<Sensor> = response.into_iter().map(Sensor::from).collect();
+
+        assert_eq!(sensors.len(), 1);
+        assert_eq!(sensors[0].name, "Hall motion");
+        assert_eq!(sensors[0].sensor_type.as_deref(), Some("ZLLPresence"));
+        assert_eq!(sensors[0].battery, Some(87));
+        assert_eq!(sensors[0].summary.as_deref(), Some("Motion detected"));
+    }
+
+    #[test]
     fn filters_room_and_zone_groups() {
         let raw = r#"{
             "1": {
@@ -628,5 +806,33 @@ mod tests {
         assert_eq!(groups.len(), 2);
         assert_eq!(groups[0].kind, GroupKind::Room);
         assert_eq!(groups[1].kind, GroupKind::Zone);
+    }
+
+    #[test]
+    fn converts_raw_automations_to_public_models() {
+        let raw = r#"{
+            "data": [
+                {
+                    "id": "automation-1",
+                    "metadata": { "name": "Morning lights" },
+                    "enabled": true,
+                    "script_id": { "rid": "script-1", "rtype": "behavior_script" }
+                },
+                {
+                    "id": "automation-2",
+                    "metadata": { "name": "Night routine" }
+                }
+            ]
+        }"#;
+
+        let response: ClipV2ListResponse<RawAutomation> = serde_json::from_str(raw).unwrap();
+        let automations: Vec<Automation> =
+            response.data.into_iter().map(Automation::from).collect();
+
+        assert_eq!(automations.len(), 2);
+        assert_eq!(automations[0].name, "Morning lights");
+        assert_eq!(automations[0].enabled, Some(true));
+        assert_eq!(automations[0].script_id.as_deref(), Some("script-1"));
+        assert_eq!(automations[1].enabled, None);
     }
 }

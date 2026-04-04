@@ -1,15 +1,16 @@
 use crate::desktop;
 use crate::hue::{
     self, curated_room_scenes, preset_light_state, ActivateSceneRequest, AudioSyncColorPalette,
-    AudioSyncSpeedMode, AudioSyncStartRequest, AudioSyncUpdateRequest, BridgeConnection, CreateSceneRequest,
-    CreateUserRequest, DeleteSceneRequest, EntertainmentArea, Group, GroupKind, Light,
-    LightStateUpdate, PipeWireOutputTarget, Scene, SetLightStateRequest,
+    AudioSyncSpeedMode, AudioSyncStartRequest, AudioSyncUpdateRequest, Automation,
+    BridgeConnection, CreateSceneRequest, CreateUserRequest, DeleteSceneRequest, EntertainmentArea,
+    Group, GroupKind, Light, LightStateUpdate, PipeWireOutputTarget, Scene, Sensor,
+    SetAutomationEnabledRequest, SetLightStateRequest,
 };
 use crate::storage::{self, AudioSyncPreferences};
 use crate::theme::{apply_theme_preference, ThemeMode, ThemePalette, ThemePreference};
 use crate::ui::{
-    AudioSyncPanel, BridgePanel, LightGrid, NoticeTone, SceneComposerRequest, StatusBanner,
-    ThemePanel, UiNotice,
+    AudioSyncPanel, AutomationPanel, BridgePanel, DevicePanel, LightGrid, NoticeTone,
+    SceneComposerRequest, StatusBanner, ThemePanel, UiNotice,
 };
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -19,6 +20,8 @@ use wasm_bindgen::{closure::Closure, JsCast};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AppPage {
     Home,
+    Devices,
+    Automations,
     Settings,
 }
 
@@ -42,6 +45,8 @@ pub fn App() -> impl IntoView {
     let (scenes, set_scenes) = signal(Vec::<Scene>::new());
     let (groups, set_groups) = signal(Vec::<Group>::new());
     let (lights, set_lights) = signal(Vec::<Light>::new());
+    let (sensors, set_sensors) = signal(Vec::<Sensor>::new());
+    let (automations, set_automations) = signal(Vec::<Automation>::new());
     let (active_connection, set_active_connection) = signal(None::<BridgeConnection>);
     let (entertainment_areas, set_entertainment_areas) = signal(Vec::<EntertainmentArea>::new());
     let (selected_entertainment_area_id, set_selected_entertainment_area_id) =
@@ -70,22 +75,22 @@ pub fn App() -> impl IntoView {
     let (did_restore_audio_sync_preferences, set_did_restore_audio_sync_preferences) =
         signal(false);
     let (did_load_pipewire_targets, set_did_load_pipewire_targets) = signal(false);
-    let (last_applied_audio_sync_selection, set_last_applied_audio_sync_selection) = signal(
-        AudioSyncSelection {
+    let (last_applied_audio_sync_selection, set_last_applied_audio_sync_selection) =
+        signal(AudioSyncSelection {
             area_id: String::new(),
             pipewire_target_object: String::new(),
             speed_mode: AudioSyncSpeedMode::default(),
             color_palette: AudioSyncColorPalette::default(),
             base_color_hex: None,
             brightness_ceiling: None,
-        },
-    );
+        });
     let (pending_scene_id, set_pending_scene_id) = signal(None::<String>);
     let (pending_room_ids, set_pending_room_ids) = signal(HashSet::<String>::new());
     let (pending_room_control_ids, set_pending_room_control_ids) = signal(HashSet::<String>::new());
     let (pending_room_brightness_timeouts, set_pending_room_brightness_timeouts) =
         signal(HashMap::<String, i32>::new());
     let (pending_light_ids, set_pending_light_ids) = signal(HashSet::<String>::new());
+    let (pending_automation_ids, set_pending_automation_ids) = signal(HashSet::<String>::new());
     let (active_scene_by_group, set_active_scene_by_group) =
         signal(HashMap::<String, String>::new());
     let (last_activated_scene_id, set_last_activated_scene_id) = signal(None::<String>);
@@ -146,6 +151,21 @@ pub fn App() -> impl IntoView {
                 }
 
                 set_is_loading_entertainment_areas.set(false);
+            });
+        }
+    });
+
+    let refresh_automations = Callback::new({
+        move |connection: BridgeConnection| {
+            spawn_local(async move {
+                match hue::list_hue_automations(connection).await {
+                    Ok(loaded_automations) => set_automations.set(loaded_automations),
+                    Err(error) => {
+                        set_automations.set(Vec::new());
+                        set_notice
+                            .set(Some(UiNotice::warning("Could not load automations", error)));
+                    }
+                }
             });
         }
     });
@@ -218,20 +238,23 @@ pub fn App() -> impl IntoView {
                 let connection = connection.clone();
                 async move {
                     match fetch_bridge_snapshot(connection.clone()).await {
-                        Ok((fetched_lights, fetched_scenes, fetched_groups)) => {
+                        Ok((fetched_lights, fetched_scenes, fetched_groups, fetched_sensors)) => {
                             let light_count = fetched_lights.len();
                             let scene_count = fetched_scenes.len();
+                            let sensor_count = fetched_sensors.len();
                             let saved_room_order = storage::load_room_order(&connection)
                                 .await
                                 .unwrap_or_else(|_| Vec::new());
                             set_lights.set(fetched_lights);
                             set_scenes.set(fetched_scenes);
                             set_groups.set(fetched_groups);
+                            set_sensors.set(fetched_sensors);
                             set_active_scene_by_group.set(HashMap::new());
                             set_last_activated_scene_id.set(None);
                             set_room_order.set(saved_room_order);
                             set_active_connection.set(Some(connection.clone()));
                             refresh_entertainment_areas.run(connection.clone());
+                            refresh_automations.run(connection.clone());
                             if let Err(error) = storage::save_bridge_connection(&connection).await {
                                 set_notice.set(Some(UiNotice::warning(
                                     "Session active, but not persisted",
@@ -241,7 +264,8 @@ pub fn App() -> impl IntoView {
                                 set_notice.set(Some(UiNotice::success(
                                     "Bridge connected",
                                     format!(
-                                        "Loaded {light_count} devices and {scene_count} scenes from the bridge."
+                                        "Loaded {light_count} devices, {sensor_count} sensor{}, and {scene_count} scenes from the bridge.",
+                                        if sensor_count == 1 { "" } else { "s" }
                                     ),
                                 )));
                             }
@@ -251,6 +275,8 @@ pub fn App() -> impl IntoView {
                             set_lights.set(Vec::new());
                             set_scenes.set(Vec::new());
                             set_groups.set(Vec::new());
+                            set_sensors.set(Vec::new());
+                            set_automations.set(Vec::new());
                             set_active_scene_by_group.set(HashMap::new());
                             set_last_activated_scene_id.set(None);
                             set_room_order.set(Vec::new());
@@ -355,21 +381,21 @@ pub fn App() -> impl IntoView {
     Effect::new(move |_| {
         let area_id = selected_entertainment_area_id.get();
         let color_palette = selected_sync_color_palette.get();
-        let (base_color_hex, brightness_ceiling) =
-            if area_id.trim().is_empty() || !matches!(color_palette, AudioSyncColorPalette::CurrentRoom)
-            {
-                (None, None)
-            } else {
-                derive_audio_sync_visual_profile(
-                    &entertainment_areas.get(),
-                    &groups.get(),
-                    &lights.get(),
-                    &scenes.get(),
-                    &active_scene_by_group.get(),
-                    last_activated_scene_id.get().as_deref(),
-                    &area_id,
-                )
-            };
+        let (base_color_hex, brightness_ceiling) = if area_id.trim().is_empty()
+            || !matches!(color_palette, AudioSyncColorPalette::CurrentRoom)
+        {
+            (None, None)
+        } else {
+            derive_audio_sync_visual_profile(
+                &entertainment_areas.get(),
+                &groups.get(),
+                &lights.get(),
+                &scenes.get(),
+                &active_scene_by_group.get(),
+                last_activated_scene_id.get().as_deref(),
+                &area_id,
+            )
+        };
 
         let selection = AudioSyncSelection {
             area_id,
@@ -632,6 +658,8 @@ pub fn App() -> impl IntoView {
                 set_lights.set(Vec::new());
                 set_scenes.set(Vec::new());
                 set_groups.set(Vec::new());
+                set_sensors.set(Vec::new());
+                set_automations.set(Vec::new());
                 set_room_order.set(Vec::new());
                 set_notice.set(Some(UiNotice::success(
                     "Saved bridge removed",
@@ -853,22 +881,20 @@ pub fn App() -> impl IntoView {
             let areas = entertainment_areas.get_untracked();
             let current_groups = groups.get_untracked();
             let current_lights = lights.get_untracked();
-            let (base_color_hex, brightness_ceiling) = if matches!(
-                color_palette,
-                AudioSyncColorPalette::CurrentRoom
-            ) {
-                derive_audio_sync_visual_profile(
-                    &areas,
-                    &current_groups,
-                    &current_lights,
-                    &scenes.get_untracked(),
-                    &active_scene_by_group.get_untracked(),
-                    last_activated_scene_id.get_untracked().as_deref(),
-                    &area_id,
-                )
-            } else {
-                (None, None)
-            };
+            let (base_color_hex, brightness_ceiling) =
+                if matches!(color_palette, AudioSyncColorPalette::CurrentRoom) {
+                    derive_audio_sync_visual_profile(
+                        &areas,
+                        &current_groups,
+                        &current_lights,
+                        &scenes.get_untracked(),
+                        &active_scene_by_group.get_untracked(),
+                        last_activated_scene_id.get_untracked().as_deref(),
+                        &area_id,
+                    )
+                } else {
+                    (None, None)
+                };
 
             set_is_audio_sync_starting.set(true);
             spawn_local(async move {
@@ -884,7 +910,9 @@ pub fn App() -> impl IntoView {
                     &scenes.get_untracked(),
                     &active_scene_by_group.get_untracked(),
                     last_activated_scene_id.get_untracked().as_deref(),
-                ).await {
+                )
+                .await
+                {
                     Ok(result) => {
                         set_active_connection.set(Some(result.connection.clone()));
                         let _ = storage::save_bridge_connection(&result.connection).await;
@@ -1213,10 +1241,16 @@ pub fn App() -> impl IntoView {
                         set_last_activated_scene_id.set(Some(scene_id.clone()));
 
                         let refresh_error = match fetch_bridge_snapshot(refresh_connection).await {
-                            Ok((fetched_lights, fetched_scenes, fetched_groups)) => {
+                            Ok((
+                                fetched_lights,
+                                fetched_scenes,
+                                fetched_groups,
+                                fetched_sensors,
+                            )) => {
                                 set_lights.set(fetched_lights);
                                 set_scenes.set(fetched_scenes);
                                 set_groups.set(fetched_groups);
+                                set_sensors.set(fetched_sensors);
                                 None
                             }
                             Err(error) => Some(error),
@@ -1270,10 +1304,16 @@ pub fn App() -> impl IntoView {
                         });
 
                         match fetch_bridge_snapshot(refresh_connection).await {
-                            Ok((fetched_lights, fetched_scenes, fetched_groups)) => {
+                            Ok((
+                                fetched_lights,
+                                fetched_scenes,
+                                fetched_groups,
+                                fetched_sensors,
+                            )) => {
                                 set_lights.set(fetched_lights);
                                 set_scenes.set(fetched_scenes);
                                 set_groups.set(fetched_groups);
+                                set_sensors.set(fetched_sensors);
                                 set_notice.set(Some(UiNotice::success(
                                     "Scene deleted",
                                     format!("{deleted_scene_name} was removed from the bridge."),
@@ -1293,6 +1333,64 @@ pub fn App() -> impl IntoView {
                 }
 
                 set_pending_scene_id.set(None);
+            });
+        }
+    });
+
+    let toggle_automation = Callback::new({
+        move |(automation_id, enabled): (String, bool)| {
+            let Some(connection) = active_connection.get_untracked() else {
+                set_notice.set(Some(UiNotice::warning(
+                    "No active bridge connection",
+                    "Connect to a bridge before changing automations.",
+                )));
+                return;
+            };
+
+            let automation_name = automations
+                .get_untracked()
+                .into_iter()
+                .find(|automation| automation.id == automation_id)
+                .map(|automation| automation.name)
+                .unwrap_or_else(|| "Automation".to_string());
+
+            set_pending_automation_ids.update(|pending| {
+                pending.insert(automation_id.clone());
+            });
+
+            spawn_local(async move {
+                let request = SetAutomationEnabledRequest {
+                    connection,
+                    automation_id: automation_id.clone(),
+                    enabled,
+                };
+
+                match hue::set_hue_automation_enabled(request).await {
+                    Ok(()) => {
+                        set_automations.update(|items| {
+                            if let Some(automation) = items
+                                .iter_mut()
+                                .find(|automation| automation.id == automation_id)
+                            {
+                                automation.enabled = Some(enabled);
+                            }
+                        });
+                        set_notice.set(Some(UiNotice::success(
+                            "Automation updated",
+                            format!(
+                                "{automation_name} was turned {}.",
+                                if enabled { "on" } else { "off" }
+                            ),
+                        )));
+                    }
+                    Err(error) => {
+                        set_notice.set(Some(UiNotice::error("Automation update failed", error)));
+                    }
+                }
+
+                set_pending_automation_ids.update(|pending| {
+                    pending.remove(&automation_id);
+                });
             });
         }
     });
@@ -1524,10 +1622,11 @@ pub fn App() -> impl IntoView {
                 let restore_result = restore_room_lights(connection.clone(), original_states).await;
 
                 match fetch_bridge_snapshot(connection.clone()).await {
-                    Ok((fetched_lights, fetched_scenes, fetched_groups)) => {
+                    Ok((fetched_lights, fetched_scenes, fetched_groups, fetched_sensors)) => {
                         set_lights.set(fetched_lights);
                         set_scenes.set(fetched_scenes);
                         set_groups.set(fetched_groups);
+                        set_sensors.set(fetched_sensors);
                         set_active_connection.set(Some(connection));
                     }
                     Err(error) => {
@@ -1660,10 +1759,11 @@ pub fn App() -> impl IntoView {
                 let restore_result = restore_room_lights(connection.clone(), original_states).await;
 
                 match fetch_bridge_snapshot(connection.clone()).await {
-                    Ok((fetched_lights, fetched_scenes, fetched_groups)) => {
+                    Ok((fetched_lights, fetched_scenes, fetched_groups, fetched_sensors)) => {
                         set_lights.set(fetched_lights);
                         set_scenes.set(fetched_scenes);
                         set_groups.set(fetched_groups);
+                        set_sensors.set(fetched_sensors);
                     }
                     Err(error) => {
                         set_notice.set(Some(UiNotice::warning(
@@ -1722,6 +1822,21 @@ pub fn App() -> impl IntoView {
             .filter(|light| light.reachable.unwrap_or(false))
             .count()
     });
+    let temperature_summary = Signal::derive(move || {
+        sensors.get().iter().find_map(|sensor| {
+            let is_temperature = sensor
+                .sensor_type
+                .as_deref()
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+                .contains("temperature");
+            if is_temperature {
+                sensor.summary.clone()
+            } else {
+                None
+            }
+        })
+    });
 
     view! {
         <main class="app-shell">
@@ -1734,21 +1849,77 @@ pub fn App() -> impl IntoView {
                     <strong>"Seasons"</strong>
                 </div>
 
-                <div class="topbar-actions">
+                <div class="topbar-toolbar">
+                    <div class="topbar-actions">
+                        <button
+                            class=move || {
+                                if page.get() == AppPage::Home {
+                                    "ghost-button nav-button is-active"
+                                } else {
+                                    "ghost-button nav-button"
+                                }
+                            }
+                            on:click=move |_| set_page.set(AppPage::Home)
+                        >
+                            <span class="nav-button-content">
+                                <span class="fa-solid fa-house" aria-hidden="true"></span>
+                                <span>"Rooms"</span>
+                            </span>
+                        </button>
+                        <button
+                            class=move || {
+                                if page.get() == AppPage::Devices {
+                                    "ghost-button nav-button is-active"
+                                } else {
+                                    "ghost-button nav-button"
+                                }
+                            }
+                            on:click=move |_| set_page.set(AppPage::Devices)
+                        >
+                            <span class="nav-button-content">
+                                <span class="fa-solid fa-lightbulb" aria-hidden="true"></span>
+                                <span>"Devices"</span>
+                            </span>
+                        </button>
+                        <button
+                            class=move || {
+                                if page.get() == AppPage::Automations {
+                                    "ghost-button nav-button is-active"
+                                } else {
+                                    "ghost-button nav-button"
+                                }
+                            }
+                            on:click=move |_| set_page.set(AppPage::Automations)
+                        >
+                            <span class="nav-button-content">
+                                <span class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></span>
+                                <span>"Automations"</span>
+                            </span>
+                        </button>
+                        <button
+                            class=move || {
+                                if page.get() == AppPage::Settings {
+                                    "ghost-button nav-button is-active"
+                                } else {
+                                    "ghost-button nav-button"
+                                }
+                            }
+                            on:click=move |_| set_page.set(AppPage::Settings)
+                        >
+                            <span class="nav-button-content">
+                                <span class="fa-solid fa-gear" aria-hidden="true"></span>
+                                <span>"Settings"</span>
+                            </span>
+                        </button>
+                    </div>
                     <button
-                        class="ghost-button"
-                        on:click=move |_| {
-                            set_page.set(if page.get() == AppPage::Home {
-                                AppPage::Settings
-                            } else {
-                                AppPage::Home
-                            });
-                        }
+                        class="ghost-button quit-button topbar-quit"
+                        on:click=move |_| quit_application.run(())
                     >
-                        {move || if page.get() == AppPage::Home { "Settings" } else { "Back to devices" }}
-                    </button>
-                    <button class="ghost-button quit-button" on:click=move |_| quit_application.run(())>
-                        "Quit"
+                        <span class="nav-button-content">
+                            <span class="fa-solid fa-xmark" aria-hidden="true"></span>
+                            <span>"Quit"</span>
+                        </span>
                     </button>
                 </div>
             </header>
@@ -1773,6 +1944,11 @@ pub fn App() -> impl IntoView {
                     </span>
                     <span class="overview-pill">{move || format!("{} on", active_light_count.get())}</span>
                     <span class="overview-pill">{move || format!("{} reachable", reachable_light_count.get())}</span>
+                    {move || {
+                        temperature_summary
+                            .get()
+                            .map(|summary| view! { <span class="overview-pill">{summary}</span> })
+                    }}
                 </div>
             </section>
 
@@ -1786,26 +1962,6 @@ pub fn App() -> impl IntoView {
                                 theme_preference=theme_preference
                                 on_palette_change=set_theme_palette
                                 on_mode_change=set_theme_mode
-                            />
-
-                            <AudioSyncPanel
-                                active_connection=active_connection
-                                entertainment_areas=entertainment_areas
-                                selected_entertainment_area_id=selected_entertainment_area_id
-                                pipewire_targets=pipewire_targets
-                                selected_pipewire_target_object=selected_pipewire_target_object
-                                selected_sync_speed_mode=selected_sync_speed_mode
-                                selected_sync_color_palette=selected_sync_color_palette
-                                is_loading_areas=is_loading_entertainment_areas
-                                is_loading_pipewire_targets=is_loading_pipewire_targets
-                                is_audio_syncing=is_audio_syncing
-                                is_audio_sync_starting=is_audio_sync_starting
-                                on_select_area=select_entertainment_area
-                                on_select_pipewire_target=select_pipewire_target
-                                on_select_sync_speed_mode=select_sync_speed_mode
-                                on_select_sync_color_palette=select_sync_color_palette
-                                on_start=start_audio_sync
-                                on_stop=stop_audio_sync
                             />
 
                             <BridgePanel
@@ -1828,9 +1984,53 @@ pub fn App() -> impl IntoView {
                             />
                         </section>
                     }.into_any()
+                } else if page.get() == AppPage::Devices {
+                    view! {
+                        <section class="workspace-grid">
+                            <DevicePanel
+                                lights=lights
+                                sensors=sensors
+                                groups=groups
+                                pending_light_ids=pending_light_ids
+                                on_toggle_light=toggle_light
+                                on_set_light_brightness=set_light_brightness
+                            />
+                        </section>
+                    }.into_any()
+                } else if page.get() == AppPage::Automations {
+                    view! {
+                        <section class="workspace-grid">
+                            <AutomationPanel
+                                active_connection=active_connection
+                                automations=automations
+                                pending_automation_ids=pending_automation_ids
+                                on_toggle_automation=toggle_automation
+                            />
+                        </section>
+                    }.into_any()
                 } else {
                     view! {
                         <section class="workspace-grid">
+                            <AudioSyncPanel
+                                active_connection=active_connection
+                                entertainment_areas=entertainment_areas
+                                selected_entertainment_area_id=selected_entertainment_area_id
+                                pipewire_targets=pipewire_targets
+                                selected_pipewire_target_object=selected_pipewire_target_object
+                                selected_sync_speed_mode=selected_sync_speed_mode
+                                selected_sync_color_palette=selected_sync_color_palette
+                                is_loading_areas=is_loading_entertainment_areas
+                                is_loading_pipewire_targets=is_loading_pipewire_targets
+                                is_audio_syncing=is_audio_syncing
+                                is_audio_sync_starting=is_audio_sync_starting
+                                on_select_area=select_entertainment_area
+                                on_select_pipewire_target=select_pipewire_target
+                                on_select_sync_speed_mode=select_sync_speed_mode
+                                on_select_sync_color_palette=select_sync_color_palette
+                                on_start=start_audio_sync
+                                on_stop=stop_audio_sync
+                            />
+
                             <LightGrid
                                 lights=lights
                                 groups=groups
@@ -1960,11 +2160,17 @@ fn run_light_update(
 
 async fn fetch_bridge_snapshot(
     connection: BridgeConnection,
-) -> Result<(Vec<Light>, Vec<Scene>, Vec<Group>), String> {
+) -> Result<(Vec<Light>, Vec<Scene>, Vec<Group>, Vec<Sensor>), String> {
     let fetched_lights = hue::list_hue_lights(connection.clone()).await?;
     let fetched_scenes = hue::list_hue_scenes(connection.clone()).await?;
-    let fetched_groups = hue::list_hue_groups(connection).await?;
-    Ok((fetched_lights, fetched_scenes, fetched_groups))
+    let fetched_groups = hue::list_hue_groups(connection.clone()).await?;
+    let fetched_sensors = hue::list_hue_sensors(connection).await?;
+    Ok((
+        fetched_lights,
+        fetched_scenes,
+        fetched_groups,
+        fetched_sensors,
+    ))
 }
 
 async fn request_audio_sync_start(
@@ -2201,9 +2407,9 @@ fn derive_audio_sync_visual_profile(
     let brightness_group = scene_group.or(matched_group);
 
     let brightness = brightness_group
-        .and_then(|group| lights_for_group(group, lights).map(|group_lights| average_light_brightness(&group_lights)))
-        .flatten()
-        .or_else(|| average_light_brightness(&lights.iter().collect::<Vec<_>>()));
+        .and_then(|group| lights_for_group(group, lights))
+        .and_then(|group_lights| preferred_sync_brightness(&group_lights))
+        .or_else(|| preferred_sync_brightness(&lights.iter().collect::<Vec<_>>()));
 
     let color = selected_scene
         .and_then(|scene| scene.preview_color_main.clone())
@@ -2219,7 +2425,9 @@ fn derive_audio_sync_visual_profile(
         .or_else(|| {
             brightness_group
                 .and_then(|group| lights_for_group(group, lights))
-                .and_then(|group_lights| average_light_color_identity_rgb(&group_lights).map(rgb_to_hex))
+                .and_then(|group_lights| {
+                    average_light_color_identity_rgb(&group_lights).map(rgb_to_hex)
+                })
         });
 
     (color, brightness)
@@ -2299,6 +2507,50 @@ fn average_light_brightness(lights: &[&Light]) -> Option<u8> {
 
     let raw_average = sum.checked_div(count)? as f32;
     Some(((raw_average / 254.0) * 100.0).round().clamp(1.0, 100.0) as u8)
+}
+
+fn preferred_sync_brightness(lights: &[&Light]) -> Option<u8> {
+    brightest_active_light_brightness(lights)
+        .or_else(|| average_active_light_brightness(lights))
+        .or_else(|| brightest_known_light_brightness(lights))
+        .or_else(|| average_light_brightness(lights))
+}
+
+fn brightest_active_light_brightness(lights: &[&Light]) -> Option<u8> {
+    lights
+        .iter()
+        .filter(|light| light.is_on.unwrap_or(false))
+        .filter_map(|light| light.brightness)
+        .max()
+        .map(brightness_to_percent)
+}
+
+fn average_active_light_brightness(lights: &[&Light]) -> Option<u8> {
+    let active_lights = lights
+        .iter()
+        .copied()
+        .filter(|light| light.is_on.unwrap_or(false))
+        .collect::<Vec<_>>();
+
+    if active_lights.is_empty() {
+        None
+    } else {
+        average_light_brightness(&active_lights)
+    }
+}
+
+fn brightest_known_light_brightness(lights: &[&Light]) -> Option<u8> {
+    lights
+        .iter()
+        .filter_map(|light| light.brightness)
+        .max()
+        .map(brightness_to_percent)
+}
+
+fn brightness_to_percent(value: u8) -> u8 {
+    ((f32::from(value) / 254.0) * 100.0)
+        .round()
+        .clamp(1.0, 100.0) as u8
 }
 
 fn average_light_color_identity_rgb(lights: &[&Light]) -> Option<(u8, u8, u8)> {

@@ -1,10 +1,10 @@
 use crate::hue::config::HueBridgeConfig;
 use crate::hue::error::HueError;
 use crate::hue::models::{
-    ClipV2ListResponse, CreateUserSuccessPayload, DiscoveredBridge, EntertainmentArea, Group,
-    HueApiResponse, Light, LightStateUpdate, RawEntertainmentArea, RawGroupsResponse,
+    Automation, ClipV2ListResponse, CreateUserSuccessPayload, DiscoveredBridge, EntertainmentArea,
+    Group, HueApiResponse, Light, LightStateUpdate, RawEntertainmentArea, RawGroupsResponse,
     RawLightsResponse, RawSceneCreateSuccess, RawSceneDetailResponse, RawScenesResponse,
-    RawStateChangeSuccess, RegisteredApp, Scene,
+    RawSensorsResponse, RawStateChangeSuccess, RegisteredApp, Scene, Sensor,
 };
 use reqwest::Client;
 use serde_json::Value;
@@ -127,6 +127,109 @@ impl HueBridgeClient {
         Ok(areas)
     }
 
+    pub async fn list_automations(&self) -> Result<Vec<Automation>, HueError> {
+        debug!(clip_v2_url = %self.config.clip_v2_base_url(), "listing Hue automations");
+        let endpoint = format!(
+            "{}/resource/behavior_instance",
+            self.config.clip_v2_base_url()
+        );
+
+        let body = self
+            .http
+            .get(endpoint)
+            .header(HUE_APPLICATION_KEY_HEADER, self.config.application_key()?)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+
+        let value = serde_json::from_str::<Value>(&body).map_err(|_| extract_api_error(&body))?;
+        let data = value
+            .get("data")
+            .and_then(Value::as_array)
+            .ok_or_else(|| extract_api_error(&body))?;
+
+        let mut automations = data
+            .iter()
+            .filter_map(automation_from_value)
+            .collect::<Vec<_>>();
+        automations.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
+        Ok(automations)
+    }
+
+    pub async fn set_automation_enabled(
+        &self,
+        automation_id: &str,
+        enabled: bool,
+    ) -> Result<(), HueError> {
+        let automation_id = automation_id.trim();
+        if automation_id.is_empty() {
+            return Err(HueError::InvalidConfig("automation ID is required"));
+        }
+
+        let endpoint = format!(
+            "{}/resource/behavior_instance/{automation_id}",
+            self.config.clip_v2_base_url()
+        );
+
+        let body = self
+            .http
+            .put(endpoint)
+            .header(HUE_APPLICATION_KEY_HEADER, self.config.application_key()?)
+            .json(&serde_json::json!({ "enabled": enabled }))
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+
+        ensure_success_body(&body, true, true)
+    }
+
+    pub async fn get_automation_detail(
+        &self,
+        automation_id: &str,
+    ) -> Result<crate::hue::models::AutomationDetail, HueError> {
+        let automation_id = automation_id.trim();
+        if automation_id.is_empty() {
+            return Err(HueError::InvalidConfig("automation ID is required"));
+        }
+
+        let instance_value = self
+            .fetch_clip_v2_resource("behavior_instance", automation_id)
+            .await?;
+        let automation = automation_from_value(&instance_value).ok_or(
+            HueError::UnexpectedResponse("the bridge returned an unsupported automation payload"),
+        )?;
+        let instance_json = serde_json::to_string_pretty(&instance_value).map_err(|_| {
+            HueError::UnexpectedResponse(
+                "the bridge returned automation details that could not be formatted",
+            )
+        })?;
+
+        let script_json = if let Some(script_id) = automation.script_id.as_deref() {
+            match self
+                .fetch_clip_v2_resource("behavior_script", script_id)
+                .await
+            {
+                Ok(script_value) => serde_json::to_string_pretty(&script_value).ok(),
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
+        Ok(crate::hue::models::AutomationDetail {
+            id: automation.id,
+            name: automation.name,
+            enabled: automation.enabled,
+            script_id: automation.script_id,
+            instance_json,
+            script_json,
+        })
+    }
+
     pub async fn start_entertainment_area(&self, area_id: &str) -> Result<(), HueError> {
         info!(area_id, "sending Hue entertainment area start action");
         self.set_entertainment_area_action(area_id, "start").await?;
@@ -201,6 +304,28 @@ impl HueBridgeClient {
 
         scenes.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
         Ok(scenes)
+    }
+
+    pub async fn list_sensors(&self) -> Result<Vec<Sensor>, HueError> {
+        let endpoint = format!("{}/sensors", self.config.authenticated_api_base_url()?);
+
+        let body = self
+            .http
+            .get(endpoint)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+
+        let sensors_response = match serde_json::from_str::<RawSensorsResponse>(&body) {
+            Ok(sensors) => sensors,
+            Err(_) => return Err(extract_api_error(&body)),
+        };
+
+        let mut sensors: Vec<Sensor> = sensors_response.into_iter().map(Sensor::from).collect();
+        sensors.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
+        Ok(sensors)
     }
 
     pub async fn list_groups(&self) -> Result<Vec<Group>, HueError> {
@@ -495,6 +620,35 @@ impl HueBridgeClient {
         Ok(EntertainmentArea::from(area))
     }
 
+    async fn fetch_clip_v2_resource(
+        &self,
+        resource_type: &str,
+        resource_id: &str,
+    ) -> Result<Value, HueError> {
+        let endpoint = format!(
+            "{}/resource/{resource_type}/{resource_id}",
+            self.config.clip_v2_base_url()
+        );
+
+        let body = self
+            .http
+            .get(endpoint)
+            .header(HUE_APPLICATION_KEY_HEADER, self.config.application_key()?)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+
+        let value = serde_json::from_str::<Value>(&body).map_err(|_| extract_api_error(&body))?;
+        value
+            .get("data")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .cloned()
+            .ok_or_else(|| extract_api_error(&body))
+    }
+
     async fn set_entertainment_area_action(
         &self,
         area_id: &str,
@@ -721,6 +875,41 @@ fn extract_api_error(body: &str) -> HueError {
         }
         Err(_) => HueError::UnexpectedResponse("unable to decode the bridge response body"),
     }
+}
+
+fn automation_from_value(value: &Value) -> Option<Automation> {
+    let id = value.get("id")?.as_str()?.trim();
+    if id.is_empty() {
+        return None;
+    }
+
+    let name = value
+        .get("metadata")
+        .and_then(|metadata| metadata.get("name"))
+        .and_then(Value::as_str)
+        .or_else(|| value.get("name").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .unwrap_or(id)
+        .to_string();
+
+    let enabled = value.get("enabled").and_then(Value::as_bool);
+    let script_id = value
+        .get("script_id")
+        .and_then(|script| {
+            script
+                .get("rid")
+                .and_then(Value::as_str)
+                .or_else(|| script.as_str())
+        })
+        .map(ToOwned::to_owned);
+
+    Some(Automation {
+        id: id.to_string(),
+        name,
+        enabled,
+        script_id,
+    })
 }
 
 fn compare_light_ids(left: &str, right: &str) -> std::cmp::Ordering {

@@ -11,10 +11,11 @@ use crate::app_state::{
 };
 use crate::audio::{capture, AudioSyncManager};
 use crate::hue::{
-    ActivateSceneRequest, AudioSyncStartRequest, AudioSyncStartResult, AudioSyncUpdateRequest, BridgeConnection,
-    CreateSceneRequest, CreateUserRequest, DeleteSceneRequest, DiscoveredBridge, EntertainmentArea,
-    Group, HueBridgeClient, HueBridgeConfig, Light, PipeWireOutputTarget, RegisteredApp, Scene,
-    SetLightStateRequest,
+    ActivateSceneRequest, AudioSyncStartRequest, AudioSyncStartResult, AudioSyncUpdateRequest,
+    Automation, AutomationDetail, BridgeConnection, CreateSceneRequest, CreateUserRequest,
+    DeleteSceneRequest, DiscoveredBridge, EntertainmentArea, Group, HueBridgeClient,
+    HueBridgeConfig, Light, PipeWireOutputTarget, RegisteredApp, Scene, Sensor,
+    SetAutomationEnabledRequest, SetLightStateRequest,
 };
 use crate::theme::ThemePreference;
 use tauri::{AppHandle, State};
@@ -80,6 +81,24 @@ pub async fn list_hue_scenes(connection: BridgeConnection) -> Result<Vec<Scene>,
 }
 
 #[tauri::command]
+pub async fn list_hue_sensors(connection: BridgeConnection) -> Result<Vec<Sensor>, String> {
+    let BridgeConnection {
+        bridge_ip,
+        username,
+        ..
+    } = connection;
+
+    let config =
+        HueBridgeConfig::authenticated(bridge_ip, username).map_err(|error| error.to_string())?;
+    let client = HueBridgeClient::new(config).map_err(|error| error.to_string())?;
+
+    client
+        .list_sensors()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn list_hue_groups(connection: BridgeConnection) -> Result<Vec<Group>, String> {
     let BridgeConnection {
         bridge_ip,
@@ -113,6 +132,45 @@ pub async fn list_hue_entertainment_areas(
 
     client
         .list_entertainment_areas()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn list_hue_automations(connection: BridgeConnection) -> Result<Vec<Automation>, String> {
+    let BridgeConnection {
+        bridge_ip,
+        username,
+        ..
+    } = connection;
+
+    let config =
+        HueBridgeConfig::authenticated(bridge_ip, username).map_err(|error| error.to_string())?;
+    let client = HueBridgeClient::new(config).map_err(|error| error.to_string())?;
+
+    client
+        .list_automations()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn get_hue_automation_detail(
+    connection: BridgeConnection,
+    automation_id: String,
+) -> Result<AutomationDetail, String> {
+    let BridgeConnection {
+        bridge_ip,
+        username,
+        ..
+    } = connection;
+
+    let config =
+        HueBridgeConfig::authenticated(bridge_ip, username).map_err(|error| error.to_string())?;
+    let client = HueBridgeClient::new(config).map_err(|error| error.to_string())?;
+
+    client
+        .get_automation_detail(&automation_id)
         .await
         .map_err(|error| error.to_string())
 }
@@ -194,6 +252,26 @@ pub async fn delete_hue_scene(request: DeleteSceneRequest) -> Result<(), String>
 
     client
         .delete_scene(&scene_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn set_hue_automation_enabled(
+    request: SetAutomationEnabledRequest,
+) -> Result<(), String> {
+    let SetAutomationEnabledRequest {
+        connection,
+        automation_id,
+        enabled,
+    } = request;
+
+    let config = HueBridgeConfig::authenticated(connection.bridge_ip, connection.username)
+        .map_err(|error| error.to_string())?;
+    let client = HueBridgeClient::new(config).map_err(|error| error.to_string())?;
+
+    client
+        .set_automation_enabled(&automation_id, enabled)
         .await
         .map_err(|error| error.to_string())
 }

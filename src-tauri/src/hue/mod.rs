@@ -8,7 +8,8 @@ pub use client::HueBridgeClient;
 pub use config::HueBridgeConfig;
 pub use models::{
     ActivateSceneRequest, AudioSyncColorPalette, AudioSyncSpeedMode, AudioSyncStartRequest,
-    AudioSyncStartResult, AudioSyncUpdateRequest, BridgeConnection, CreateSceneRequest, CreateUserRequest,
-    DeleteSceneRequest, DiscoveredBridge, EntertainmentArea, Group, Light, PipeWireOutputTarget,
-    RegisteredApp, Scene, SetLightStateRequest,
+    AudioSyncStartResult, AudioSyncUpdateRequest, Automation, AutomationDetail, BridgeConnection,
+    CreateSceneRequest, CreateUserRequest, DeleteSceneRequest, DiscoveredBridge, EntertainmentArea,
+    Group, Light, PipeWireOutputTarget, RegisteredApp, Scene, Sensor, SetAutomationEnabledRequest,
+    SetLightStateRequest,
 };

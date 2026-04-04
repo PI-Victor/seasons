@@ -6,7 +6,7 @@ pub struct CuratedScenePreset {
     pub description: &'static str,
 }
 
-const CURATED_ROOM_SCENES: [CuratedScenePreset; 4] = [
+const CURATED_ROOM_SCENES: [CuratedScenePreset; 10] = [
     CuratedScenePreset {
         name: "Quiet Focus",
         description: "clean working light with low color noise",
@@ -22,6 +22,30 @@ const CURATED_ROOM_SCENES: [CuratedScenePreset; 4] = [
     CuratedScenePreset {
         name: "Signal Boost",
         description: "full-bright utility light for resets and cleanup",
+    },
+    CuratedScenePreset {
+        name: "Blue Hour",
+        description: "cool dusk color with a soft evening edge",
+    },
+    CuratedScenePreset {
+        name: "Ember Drift",
+        description: "deep amber glow for a warmer room tone",
+    },
+    CuratedScenePreset {
+        name: "Rain Glass",
+        description: "muted blue gray light for calmer late hours",
+    },
+    CuratedScenePreset {
+        name: "Velvet Sunset",
+        description: "richer orange pink blend with more atmosphere",
+    },
+    CuratedScenePreset {
+        name: "After Midnight",
+        description: "low indigo scene for darker listening sessions",
+    },
+    CuratedScenePreset {
+        name: "Forest Hush",
+        description: "subtle green-tinted ambient light",
     },
 ];
 
@@ -65,6 +89,48 @@ pub fn preset_light_state(
             hue: Some((9_400_i32 + i32::from(spread) * 20).clamp(0, 65_535) as u16),
             transition_time: Some(3),
         },
+        "Blue Hour" => LightStateUpdate {
+            on: Some(true),
+            brightness: Some((132_i16 + spread / 3).clamp(72, 190) as u8),
+            saturation: Some((168_i16 + spread.abs() / 3).clamp(96, 230) as u8),
+            hue: Some((46_500_i32 + i32::from(spread) * 42).clamp(0, 65_535) as u16),
+            transition_time: Some(5),
+        },
+        "Ember Drift" => LightStateUpdate {
+            on: Some(true),
+            brightness: Some((118_i16 + spread / 3).clamp(52, 188) as u8),
+            saturation: Some((184_i16 + spread.abs() / 3).clamp(120, 240) as u8),
+            hue: Some((5_000_i32 + i32::from(spread) * 20).clamp(0, 65_535) as u16),
+            transition_time: Some(5),
+        },
+        "Rain Glass" => LightStateUpdate {
+            on: Some(true),
+            brightness: Some((102_i16 + spread / 4).clamp(44, 164) as u8),
+            saturation: Some((134_i16 + spread.abs() / 3).clamp(72, 200) as u8),
+            hue: Some((38_600_i32 + i32::from(spread) * 34).clamp(0, 65_535) as u16),
+            transition_time: Some(6),
+        },
+        "Velvet Sunset" => LightStateUpdate {
+            on: Some(true),
+            brightness: Some((164_i16 + spread / 3).clamp(94, 224) as u8),
+            saturation: Some((198_i16 + spread.abs() / 4).clamp(120, 254) as u8),
+            hue: Some((3_700_i32 + i32::from(spread) * 18).clamp(0, 65_535) as u16),
+            transition_time: Some(4),
+        },
+        "After Midnight" => LightStateUpdate {
+            on: Some(true),
+            brightness: Some((56_i16 + spread / 5).clamp(6, 92) as u8),
+            saturation: Some((206_i16 + spread.abs() / 4).clamp(130, 254) as u8),
+            hue: Some((48_200_i32 + i32::from(spread) * 38).clamp(0, 65_535) as u16),
+            transition_time: Some(6),
+        },
+        "Forest Hush" => LightStateUpdate {
+            on: Some(true),
+            brightness: Some((124_i16 + spread / 4).clamp(58, 186) as u8),
+            saturation: Some((150_i16 + spread.abs() / 3).clamp(80, 220) as u8),
+            hue: Some((23_800_i32 + i32::from(spread) * 28).clamp(0, 65_535) as u16),
+            transition_time: Some(5),
+        },
         _ => LightStateUpdate {
             on: Some(true),
             brightness: Some(180),
@@ -91,9 +157,10 @@ mod tests {
     #[test]
     fn curated_scene_pack_has_expected_defaults() {
         let scenes = curated_room_scenes();
-        assert_eq!(scenes.len(), 4);
+        assert_eq!(scenes.len(), 10);
         assert_eq!(scenes[0].name, "Quiet Focus");
         assert_eq!(scenes[3].name, "Signal Boost");
+        assert_eq!(scenes[9].name, "Forest Hush");
     }
 
     #[test]

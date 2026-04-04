@@ -74,21 +74,26 @@ impl AudioSyncManager {
 
         debug!("starting entertainment area");
         client.start_entertainment_area(&area.id).await?;
-        debug!("connecting DTLS entertainment stream");
-        let mut stream = EntertainmentStreamSession::connect(&resolved_connection, &area).await?;
-        let test_frame = build_rgb_channels(&area.channels, 1.0, 0.24, 0.78, 0.45);
-        debug!("writing initial entertainment test frame");
-        stream.write_rgb_frame(&test_frame).await?;
-
-        let (capture, feature_rx) = start_sink_capture(pipewire_target_object.as_deref())?;
-        let (stop_tx, stop_rx) = oneshot::channel();
-        let task_area = area.clone();
         let stream_profile = Arc::new(RwLock::new(StreamProfile::new(
             speed_mode,
             color_palette,
             base_color_hex,
             brightness_ceiling,
         )));
+        debug!("connecting DTLS entertainment stream");
+        let mut stream = EntertainmentStreamSession::connect(&resolved_connection, &area).await?;
+        let initial_frame = {
+            let profile = stream_profile.read().map_err(|_| {
+                HueError::EntertainmentStream("audio sync profile lock poisoned".to_string())
+            })?;
+            profile.hold_channels(&area)
+        };
+        debug!("writing initial entertainment hold frame");
+        stream.write_rgb_frame(&initial_frame).await?;
+
+        let (capture, feature_rx) = start_sink_capture(pipewire_target_object.as_deref())?;
+        let (stop_tx, stop_rx) = oneshot::channel();
+        let task_area = area.clone();
         let task_profile = Arc::clone(&stream_profile);
 
         let stream_task = tokio::spawn(async move {
@@ -190,6 +195,9 @@ async fn run_stream_loop(
 ) -> Result<(), HueError> {
     let mut latest = AudioFeatures::default();
     let mut smoothed = AudioFeatures::default();
+    let mut smoothed_onset = 0.0_f32;
+    let mut display_intensity = 0.0_f32;
+    let mut accent_envelope = 0.0_f32;
     let mut saw_audio = false;
     let mut frame_index = 0_u32;
     debug!(area_id = %area.id, channel_count = area.channels.len(), "audio sync stream loop running");
@@ -216,28 +224,45 @@ async fn run_stream_loop(
                     if features.level > 0.015
                         || features.bass > 0.02
                         || features.mid > 0.02
+                        || features.attack > 0.02
                         || features.treble > 0.02
                     {
                         saw_audio = true;
                     }
                 }
 
-                let channels = if !saw_audio && frame_index < 50 {
+                let channels = if !saw_audio {
                     if frame_index == 0 {
-                        debug!("no audio features received yet; sending startup pulse frames");
+                        debug!("no audio features received yet; holding current profile frame");
                     }
-                    startup_pulse_channels(&area, frame_index)
+                    profile.hold_channels(&area)
                 } else {
+                    let previous_smoothed_bass = smoothed.bass;
                     smoothed.level = smooth(smoothed.level, latest.level, profile.level_smoothing);
                     smoothed.bass = smooth(smoothed.bass, latest.bass, profile.band_smoothing);
                     smoothed.mid = smooth(smoothed.mid, latest.mid, profile.band_smoothing);
+                    smoothed.attack =
+                        smooth(smoothed.attack, latest.attack, profile.attack_smoothing);
                     smoothed.treble =
                         smooth(smoothed.treble, latest.treble, profile.treble_smoothing);
+                    smoothed_onset =
+                        smooth(smoothed_onset, latest.onset, profile.onset_smoothing);
 
                     let level = amplify(smoothed.level, profile.level_gain);
-                    let bass = amplify(smoothed.bass, profile.bass_gain);
+                    let bass =
+                        shape_response(amplify(smoothed.bass, profile.bass_gain), profile.bass_power);
+                    let bass_pulse = shape_response(
+                        amplify(
+                            (latest.bass - previous_smoothed_bass).max(0.0),
+                            profile.bass_pulse_gain,
+                        ),
+                        profile.bass_pulse_power,
+                    );
                     let mid = amplify(smoothed.mid, profile.mid_gain);
+                    let attack =
+                        shape_response(amplify(smoothed.attack, profile.attack_gain), profile.attack_power);
                     let treble = amplify(smoothed.treble, profile.treble_gain);
+                    let onset = amplify(smoothed_onset, profile.onset_gain);
 
                     let (red, green, blue) = if profile.lock_base_hue {
                         profile.base_color
@@ -269,16 +294,55 @@ async fn run_stream_loop(
                         (red, green, blue)
                     };
 
-                    let intensity_driver = (
+                    let steady_driver = (
                         level * profile.level_intensity_weight
                         + bass * profile.bass_intensity_weight
                         + mid * profile.mid_intensity_weight
                         + treble * profile.treble_intensity_weight
                     ).clamp(0.0, 1.0);
+                    let transient_driver = (
+                        bass_pulse * profile.bass_pulse_intensity_weight
+                        + attack * profile.attack_intensity_weight
+                        + onset * profile.onset_intensity_weight
+                    ).clamp(0.0, 1.0);
 
-                    let intensity = (profile.intensity_floor
-                        + intensity_driver.powf(profile.level_power) * profile.intensity_range)
+                    let target_intensity = (profile.intensity_floor
+                        + steady_driver.powf(profile.level_power) * profile.intensity_range)
                         .clamp(0.0, profile.intensity_ceiling);
+                    let intensity_smoothing = if target_intensity >= display_intensity {
+                        profile.intensity_attack_smoothing
+                    } else {
+                        profile.intensity_release_smoothing
+                    };
+                    display_intensity = smooth(display_intensity, target_intensity, intensity_smoothing);
+                    accent_envelope =
+                        (accent_envelope * profile.accent_decay).max(transient_driver);
+                    let flash_boost = accent_envelope
+                        * profile.onset_flash_range
+                        * (0.45 + 0.55 * bass.clamp(0.0, 1.0));
+
+                    let intensity =
+                        (display_intensity + flash_boost).clamp(0.0, profile.intensity_ceiling);
+
+                    if frame_index % 25 == 0 {
+                        trace!(
+                            frame_index,
+                            level,
+                            bass,
+                            bass_pulse,
+                            mid,
+                            attack,
+                            treble,
+                            onset,
+                            steady_driver,
+                            transient_driver,
+                            display_intensity,
+                            accent_envelope,
+                            flash_boost,
+                            intensity,
+                            "audio sync rendered frame"
+                        );
+                    }
 
                     build_rgb_channels(&area.channels, red, green, blue, intensity)
                 };
@@ -289,7 +353,9 @@ async fn run_stream_loop(
                         level = latest.level,
                         bass = latest.bass,
                         mid = latest.mid,
+                        attack = latest.attack,
                         treble = latest.treble,
+                        onset = latest.onset,
                         "audio sync feature frame"
                     );
                 }
@@ -308,6 +374,10 @@ fn amplify(value: f32, gain: f32) -> f32 {
     (value * gain).clamp(0.0, 1.0)
 }
 
+fn shape_response(value: f32, power: f32) -> f32 {
+    value.clamp(0.0, 1.0).powf(power)
+}
+
 #[derive(Clone, Copy)]
 struct StreamProfile {
     base_color: (f32, f32, f32),
@@ -318,18 +388,34 @@ struct StreamProfile {
     intensity_floor: f32,
     intensity_range: f32,
     intensity_ceiling: f32,
+    idle_intensity: f32,
     level_power: f32,
+    bass_power: f32,
+    bass_pulse_power: f32,
+    attack_power: f32,
     level_intensity_weight: f32,
     bass_intensity_weight: f32,
+    bass_pulse_intensity_weight: f32,
     mid_intensity_weight: f32,
+    attack_intensity_weight: f32,
     treble_intensity_weight: f32,
+    onset_intensity_weight: f32,
+    onset_flash_range: f32,
     level_gain: f32,
     bass_gain: f32,
+    bass_pulse_gain: f32,
     mid_gain: f32,
+    attack_gain: f32,
     treble_gain: f32,
+    onset_gain: f32,
     level_smoothing: f32,
     band_smoothing: f32,
+    attack_smoothing: f32,
     treble_smoothing: f32,
+    onset_smoothing: f32,
+    intensity_attack_smoothing: f32,
+    intensity_release_smoothing: f32,
+    accent_decay: f32,
     tick_ms: u64,
 }
 
@@ -346,40 +432,62 @@ impl StreamProfile {
             tick_ms,
             level_smoothing,
             band_smoothing,
+            attack_smoothing,
             treble_smoothing,
+            onset_smoothing,
+            intensity_attack_smoothing,
+            intensity_release_smoothing,
+            accent_decay,
             level_gain,
             bass_gain,
+            bass_pulse_gain,
             mid_gain,
+            attack_gain,
             treble_gain,
+            onset_gain,
             intensity_floor_factor,
             min_intensity_floor,
             min_intensity_range,
             level_power,
+            bass_power,
+            bass_pulse_power,
+            attack_power,
             level_intensity_weight,
             bass_intensity_weight,
+            bass_pulse_intensity_weight,
             mid_intensity_weight,
+            attack_intensity_weight,
             treble_intensity_weight,
+            onset_intensity_weight,
+            onset_flash_range,
         ) = match speed_mode {
-            AudioSyncSpeedMode::Slow => {
-                (60, 0.10, 0.12, 0.10, 12.0, 9.0, 8.5, 9.5, 0.62, 0.26, 0.28, 1.0, 0.70, 0.20, 0.07, 0.03)
-            }
-            AudioSyncSpeedMode::Medium => {
-                (35, 0.22, 0.24, 0.20, 12.0, 9.0, 8.5, 9.5, 0.62, 0.26, 0.28, 1.0, 0.55, 0.30, 0.10, 0.05)
-            }
-            AudioSyncSpeedMode::High => {
-                (14, 0.74, 0.76, 0.72, 20.0, 18.0, 13.0, 12.0, 0.20, 0.12, 0.62, 0.58, 0.46, 0.34, 0.12, 0.08)
-            }
+            AudioSyncSpeedMode::Slow => (
+                60, 0.12, 0.14, 0.18, 0.12, 0.16, 0.28, 0.18, 0.74, 1.1, 1.3, 2.4, 0.7, 1.35, 0.3,
+                1.8, 0.18, 0.04, 0.42, 1.18, 0.88, 1.20, 1.00, 0.24, 0.16, 0.34, 0.04, 0.14, 0.01,
+                0.10, 0.05,
+            ),
+            AudioSyncSpeedMode::Medium => (
+                35, 0.18, 0.20, 0.26, 0.16, 0.12, 0.22, 0.12, 0.66, 1.3, 1.6, 3.8, 0.65, 1.85,
+                0.35, 2.4, 0.01, 0.003, 0.92, 1.65, 0.70, 1.08, 0.94, 0.01, 0.20, 0.52, 0.015,
+                0.24, 0.005, 0.18, 0.08,
+            ),
+            AudioSyncSpeedMode::High => (
+                14, 0.78, 0.82, 0.32, 0.74, 0.42, 0.16, 0.08, 0.58, 1.6, 1.9, 5.2, 0.7, 2.15, 0.4,
+                2.8, 0.02, 0.01, 0.90, 0.78, 0.58, 1.00, 0.88, 0.03, 0.18, 0.60, 0.015, 0.28,
+                0.004, 0.12, 0.12,
+            ),
         };
+        let brightness_ratio = brightness_ceiling.unwrap_or(100).clamp(1, 100) as f32 / 100.0;
+        let idle_intensity = brightness_ratio.clamp(0.02, 1.0);
+        let intensity_ceiling = brightness_ratio.clamp(0.02, 1.0);
         let min_intensity_floor = min_intensity_floor as f32;
         let min_intensity_range = min_intensity_range as f32;
-
-        let brightness_ratio = brightness_ceiling.unwrap_or(100).clamp(1, 100) as f32 / 100.0;
-        let intensity_ceiling =
-            (0.04 + brightness_ratio.powf(1.55) * 0.96).clamp(0.04, 1.0);
-        let intensity_floor = (intensity_ceiling * intensity_floor_factor)
-            .clamp(min_intensity_floor.min(intensity_ceiling * 0.4), intensity_ceiling * 0.9);
-        let intensity_range =
-            (intensity_ceiling - intensity_floor).max((intensity_ceiling * min_intensity_range).min(intensity_ceiling));
+        let intensity_floor = (intensity_ceiling * intensity_floor_factor).clamp(
+            min_intensity_floor.min(intensity_ceiling * 0.4),
+            intensity_ceiling * 0.98,
+        );
+        let intensity_range = (intensity_ceiling - intensity_floor)
+            .max((intensity_ceiling * min_intensity_range).min(intensity_ceiling));
 
         Self {
             base_color,
@@ -390,24 +498,52 @@ impl StreamProfile {
             intensity_floor,
             intensity_range,
             intensity_ceiling,
+            idle_intensity,
             level_power,
+            bass_power,
+            bass_pulse_power,
+            attack_power,
             level_intensity_weight,
             bass_intensity_weight,
+            bass_pulse_intensity_weight,
             mid_intensity_weight,
+            attack_intensity_weight,
             treble_intensity_weight,
+            onset_intensity_weight,
+            onset_flash_range,
             level_gain,
             bass_gain,
+            bass_pulse_gain,
             mid_gain,
+            attack_gain,
             treble_gain,
+            onset_gain,
             level_smoothing,
             band_smoothing,
+            attack_smoothing,
             treble_smoothing,
+            onset_smoothing,
+            intensity_attack_smoothing,
+            intensity_release_smoothing,
+            accent_decay,
             tick_ms,
         }
     }
 
     fn tick_interval(&self) -> Duration {
         Duration::from_millis(self.tick_ms)
+    }
+
+    fn hold_channels(
+        &self,
+        area: &EntertainmentArea,
+    ) -> Vec<crate::hue::entertainment::EntertainmentChannelColor> {
+        let (red, green, blue) = if self.lock_base_hue {
+            self.base_color
+        } else {
+            self.mid_color
+        };
+        build_rgb_channels(&area.channels, red, green, blue, self.idle_intensity)
     }
 }
 
@@ -423,10 +559,11 @@ fn palette_colors(
 ) {
     match palette {
         AudioSyncColorPalette::CurrentRoom => {
-            let base = normalize_color(parse_hex_color(base_color_hex).unwrap_or((0.92, 0.92, 0.92)));
-            let low = mix_color(base, (0.0, 0.0, 0.0), 0.08);
+            let base =
+                normalize_color(parse_hex_color(base_color_hex).unwrap_or((0.92, 0.92, 0.92)));
+            let low = mix_color(base, (0.0, 0.0, 0.0), 0.10);
             let mid = base;
-            let high = mix_color(base, (1.0, 1.0, 1.0), 0.06);
+            let high = mix_color(base, (1.0, 1.0, 1.0), 0.10);
             (base, low, mid, high, true)
         }
         AudioSyncColorPalette::Sunset => (
@@ -522,7 +659,7 @@ mod tests {
 
     #[test]
     fn current_room_palette_uses_base_color() {
-        let (_, mid, _) = palette_colors(AudioSyncColorPalette::CurrentRoom, Some("#8040ff"));
+        let (_, _, mid, _, _) = palette_colors(AudioSyncColorPalette::CurrentRoom, Some("#8040ff"));
 
         assert!((mid.0 - 0.501).abs() < 0.01);
         assert!((mid.1 - 0.250).abs() < 0.01);
@@ -538,27 +675,58 @@ mod tests {
             Some(35),
         );
 
-        assert!(profile.intensity_ceiling <= 0.35 + f32::EPSILON);
+        assert!((profile.intensity_ceiling - 0.35).abs() < f32::EPSILON);
         assert!(profile.intensity_floor < profile.intensity_ceiling);
+    }
+
+    #[test]
+    fn medium_profile_keeps_more_transient_headroom_than_high() {
+        let medium = StreamProfile::new(
+            AudioSyncSpeedMode::Medium,
+            AudioSyncColorPalette::CurrentRoom,
+            Some("#ff3344".to_string()),
+            Some(100),
+        );
+        let high = StreamProfile::new(
+            AudioSyncSpeedMode::High,
+            AudioSyncColorPalette::CurrentRoom,
+            Some("#ff3344".to_string()),
+            Some(100),
+        );
+
+        assert!(medium.level_intensity_weight < high.level_intensity_weight);
+        assert!(medium.onset_intensity_weight > high.onset_intensity_weight);
+        assert!(medium.bass_intensity_weight > medium.level_intensity_weight);
+        assert!(medium.onset_flash_range < high.onset_flash_range);
+    }
+
+    #[test]
+    fn sync_profiles_prioritize_bass_over_mid_and_treble() {
+        let medium = StreamProfile::new(
+            AudioSyncSpeedMode::Medium,
+            AudioSyncColorPalette::CurrentRoom,
+            Some("#ff3344".to_string()),
+            Some(100),
+        );
+        let high = StreamProfile::new(
+            AudioSyncSpeedMode::High,
+            AudioSyncColorPalette::CurrentRoom,
+            Some("#ff3344".to_string()),
+            Some(100),
+        );
+
+        assert!(medium.bass_intensity_weight > medium.mid_intensity_weight);
+        assert!(medium.bass_intensity_weight > medium.treble_intensity_weight);
+        assert!(high.bass_intensity_weight > high.mid_intensity_weight);
+        assert!(high.bass_intensity_weight > high.treble_intensity_weight);
+        assert!(medium.bass_power < 1.0);
+        assert!(high.bass_power < 1.0);
+        assert!(medium.bass_pulse_intensity_weight > medium.level_intensity_weight);
+        assert!(high.bass_pulse_intensity_weight > high.level_intensity_weight);
     }
 
     #[test]
     fn parses_hex_color() {
         assert_eq!(parse_hex_color(Some("#ff0000")), Some((1.0, 0.0, 0.0)));
     }
-}
-
-fn startup_pulse_channels(
-    area: &EntertainmentArea,
-    frame_index: u32,
-) -> Vec<crate::hue::entertainment::EntertainmentChannelColor> {
-    let phase = (frame_index / 10) % 4;
-    let (red, green, blue, intensity) = match phase {
-        0 => (1.0, 0.16, 0.18, 0.95),
-        1 => (0.18, 0.95, 0.25, 0.95),
-        2 => (0.22, 0.28, 1.0, 0.95),
-        _ => (1.0, 1.0, 1.0, 0.6),
-    };
-
-    build_rgb_channels(&area.channels, red, green, blue, intensity)
 }

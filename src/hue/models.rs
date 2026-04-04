@@ -61,6 +61,34 @@ pub struct EntertainmentPosition {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct Automation {
+    pub id: String,
+    pub name: String,
+    pub enabled: Option<bool>,
+    pub script_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AutomationDetail {
+    pub id: String,
+    pub name: String,
+    pub enabled: Option<bool>,
+    pub script_id: Option<String>,
+    pub instance_json: String,
+    pub script_json: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SetAutomationEnabledRequest {
+    pub connection: BridgeConnection,
+    pub automation_id: String,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct AudioSyncStartRequest {
     pub connection: BridgeConnection,
     pub entertainment_area_id: String,
@@ -139,6 +167,19 @@ pub struct Light {
     pub reachable: Option<bool>,
     pub light_type: Option<String>,
     pub model_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Sensor {
+    pub id: String,
+    pub name: String,
+    pub sensor_type: Option<String>,
+    pub model_id: Option<String>,
+    pub reachable: Option<bool>,
+    pub battery: Option<u8>,
+    pub last_updated: Option<String>,
+    pub summary: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

@@ -1,7 +1,8 @@
 use crate::hue::models::{
-    ActivateSceneRequest, AudioSyncStartRequest, AudioSyncStartResult, AudioSyncUpdateRequest, BridgeConnection,
-    CreateSceneRequest, CreateUserRequest, DeleteSceneRequest, DiscoveredBridge, EntertainmentArea,
-    Group, Light, PipeWireOutputTarget, RegisteredApp, Scene, SetLightStateRequest,
+    ActivateSceneRequest, AudioSyncStartRequest, AudioSyncStartResult, AudioSyncUpdateRequest,
+    Automation, AutomationDetail, BridgeConnection, CreateSceneRequest, CreateUserRequest,
+    DeleteSceneRequest, DiscoveredBridge, EntertainmentArea, Group, Light, PipeWireOutputTarget,
+    RegisteredApp, Scene, Sensor, SetAutomationEnabledRequest, SetLightStateRequest,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -23,6 +24,10 @@ pub async fn list_hue_scenes(connection: BridgeConnection) -> Result<Vec<Scene>,
     invoke_with_named_args("list_hue_scenes", &[("connection", &connection)]).await
 }
 
+pub async fn list_hue_sensors(connection: BridgeConnection) -> Result<Vec<Sensor>, String> {
+    invoke_with_named_args("list_hue_sensors", &[("connection", &connection)]).await
+}
+
 pub async fn list_hue_groups(connection: BridgeConnection) -> Result<Vec<Group>, String> {
     invoke_with_named_args("list_hue_groups", &[("connection", &connection)]).await
 }
@@ -35,6 +40,41 @@ pub async fn list_hue_entertainment_areas(
         &[("connection", &connection)],
     )
     .await
+}
+
+pub async fn list_hue_automations(connection: BridgeConnection) -> Result<Vec<Automation>, String> {
+    invoke_with_named_args("list_hue_automations", &[("connection", &connection)]).await
+}
+
+pub async fn get_hue_automation_detail(
+    connection: BridgeConnection,
+    automation_id: String,
+) -> Result<AutomationDetail, String> {
+    let payload = js_sys::Object::new();
+    let connection_value = serde_wasm_bindgen::to_value(&connection).map_err(|error| {
+        format!("failed to encode `get_hue_automation_detail` connection: {error}")
+    })?;
+    let automation_id_value = serde_wasm_bindgen::to_value(&automation_id).map_err(|error| {
+        format!("failed to encode `get_hue_automation_detail` automation id: {error}")
+    })?;
+
+    js_sys::Reflect::set(
+        &payload,
+        &JsValue::from_str("connection"),
+        &connection_value,
+    )
+    .map_err(js_error_to_string)?;
+    js_sys::Reflect::set(
+        &payload,
+        &JsValue::from_str("automationId"),
+        &automation_id_value,
+    )
+    .map_err(js_error_to_string)?;
+
+    let response = invoke("get_hue_automation_detail", payload.into()).await?;
+    serde_wasm_bindgen::from_value(response).map_err(|error| {
+        format!("failed to decode response for `get_hue_automation_detail`: {error}")
+    })
 }
 
 pub async fn list_pipewire_output_targets() -> Result<Vec<PipeWireOutputTarget>, String> {
@@ -55,6 +95,12 @@ pub async fn create_hue_scene(request: CreateSceneRequest) -> Result<Scene, Stri
 
 pub async fn delete_hue_scene(request: DeleteSceneRequest) -> Result<(), String> {
     invoke_with_named_args("delete_hue_scene", &[("request", &request)]).await
+}
+
+pub async fn set_hue_automation_enabled(
+    request: SetAutomationEnabledRequest,
+) -> Result<(), String> {
+    invoke_with_named_args("set_hue_automation_enabled", &[("request", &request)]).await
 }
 
 pub async fn start_hue_audio_sync(
