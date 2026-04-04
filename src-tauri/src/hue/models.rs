@@ -31,7 +31,7 @@ pub struct RegisteredApp {
     pub client_key: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Light {
     pub id: String,
@@ -40,6 +40,7 @@ pub struct Light {
     pub brightness: Option<u8>,
     pub saturation: Option<u8>,
     pub hue: Option<u16>,
+    pub xy: Option<[f32; 2]>,
     pub reachable: Option<bool>,
     pub light_type: Option<String>,
     pub model_id: Option<String>,
@@ -96,6 +97,14 @@ pub struct ActivateSceneRequest {
     pub username: String,
     pub scene_id: String,
     pub group_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteSceneRequest {
+    pub bridge_ip: String,
+    pub username: String,
+    pub scene_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -163,6 +172,8 @@ pub(crate) struct RawHueLightState {
     pub bri: Option<u8>,
     pub sat: Option<u8>,
     pub hue: Option<u16>,
+    #[serde(default)]
+    pub xy: Option<[f32; 2]>,
     pub reachable: Option<bool>,
 }
 
@@ -175,6 +186,7 @@ impl From<(String, RawHueLight)> for Light {
             brightness: raw.state.bri,
             saturation: raw.state.sat,
             hue: raw.state.hue,
+            xy: raw.state.xy,
             reachable: raw.state.reachable,
             light_type: raw.light_type,
             model_id: raw.modelid,

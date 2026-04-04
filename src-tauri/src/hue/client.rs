@@ -13,6 +13,13 @@ pub struct HueBridgeClient {
     config: HueBridgeConfig,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SceneCatalogEntry {
+    id: String,
+    name: String,
+    group_id: Option<String>,
+}
+
 impl HueBridgeClient {
     pub fn new(config: HueBridgeConfig) -> Result<Self, HueError> {
         let http = Client::builder()
@@ -240,26 +247,33 @@ impl HueBridgeClient {
         }
 
         let endpoint = format!("{}/scenes", self.config.authenticated_api_base_url()?);
+        let existing_scenes = self.fetch_scene_catalog().await?;
 
-        let response = self
+        let body = self
             .http
             .post(endpoint)
-            .json(&serde_json::json!({
-                "name": scene_name,
-                "group": group_id,
-                "lights": light_ids,
-                "type": "GroupScene",
-                "recycle": false,
-            }))
+            .json(&group_scene_create_body(scene_name, group_id))
             .send()
             .await?
-            .error_for_status()?;
+            .error_for_status()?
+            .text()
+            .await?;
 
-        let scene_id = extract_created_scene_id(
-            response
-                .json::<Vec<HueApiResponse<RawSceneCreateSuccess>>>()
-                .await?,
-        )?;
+        let scene_id = match extract_created_scene_id_from_body(&body) {
+            Ok(scene_id) => scene_id,
+            Err(_) => {
+                let refreshed_scenes = self.fetch_scene_catalog().await?;
+                recover_created_scene_id(
+                    &existing_scenes,
+                    &refreshed_scenes,
+                    scene_name,
+                    Some(group_id),
+                )
+                .ok_or(HueError::UnexpectedResponse(
+                    "the bridge did not report a created scene identifier",
+                ))?
+            }
+        };
 
         let capture_endpoint = format!(
             "{}/scenes/{scene_id}",
@@ -294,6 +308,29 @@ impl HueBridgeClient {
         })
     }
 
+    pub async fn delete_scene(&self, scene_id: &str) -> Result<(), HueError> {
+        let scene_id = scene_id.trim();
+        if scene_id.is_empty() {
+            return Err(HueError::InvalidConfig("scene ID is required"));
+        }
+
+        let endpoint = format!(
+            "{}/scenes/{scene_id}",
+            self.config.authenticated_api_base_url()?
+        );
+
+        let body = self
+            .http
+            .delete(endpoint)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+
+        ensure_success_body(&body, true, true)
+    }
+
     async fn fetch_scene_preview(&self, scene_id: &str) -> Result<Option<ScenePreview>, HueError> {
         let endpoint = format!(
             "{}/scenes/{scene_id}",
@@ -316,6 +353,50 @@ impl HueBridgeClient {
 
         Ok(ScenePreview::from_lightstates(detail.lightstates.values()))
     }
+
+    async fn fetch_scene_catalog(&self) -> Result<Vec<SceneCatalogEntry>, HueError> {
+        let endpoint = format!("{}/scenes", self.config.authenticated_api_base_url()?);
+
+        let body = self
+            .http
+            .get(endpoint)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+
+        let scenes_response = match serde_json::from_str::<RawScenesResponse>(&body) {
+            Ok(scenes) => scenes,
+            Err(_) => return Err(extract_api_error(&body)),
+        };
+
+        let mut scenes = scenes_response
+            .into_iter()
+            .filter_map(|(id, raw)| {
+                if raw.recycle {
+                    None
+                } else {
+                    Some(SceneCatalogEntry {
+                        id,
+                        name: raw.name,
+                        group_id: raw.group,
+                    })
+                }
+            })
+            .collect::<Vec<_>>();
+        scenes.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
+        Ok(scenes)
+    }
+}
+
+fn group_scene_create_body(scene_name: &str, group_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "name": scene_name,
+        "group": group_id,
+        "type": "GroupScene",
+        "recycle": false,
+    })
 }
 
 struct ScenePreview {
@@ -380,6 +461,38 @@ fn ensure_success_only(
     Ok(())
 }
 
+fn ensure_success_body(body: &str, empty_ok: bool, opaque_success_ok: bool) -> Result<(), HueError> {
+    if empty_ok && body.trim().is_empty() {
+        return Ok(());
+    }
+
+    match serde_json::from_str::<Vec<HueApiResponse<RawStateChangeSuccess>>>(body) {
+        Ok(responses) => ensure_success_only(responses),
+        Err(_) => {
+            if let Ok(responses) = serde_json::from_str::<Vec<HueApiResponse<Value>>>(body) {
+                for response in responses {
+                    if let HueApiResponse::Error { error } = response {
+                        return Err(error.into());
+                    }
+                }
+                return Ok(());
+            }
+
+            if opaque_success_ok {
+                Ok(())
+            } else {
+                Err(extract_api_error(body))
+            }
+        }
+    }
+}
+
+fn extract_created_scene_id_from_body(body: &str) -> Result<String, HueError> {
+    let responses = serde_json::from_str::<Vec<HueApiResponse<RawSceneCreateSuccess>>>(body)
+        .map_err(|_| extract_api_error(body))?;
+    extract_created_scene_id(responses)
+}
+
 fn extract_created_scene_id(
     responses: Vec<HueApiResponse<RawSceneCreateSuccess>>,
 ) -> Result<String, HueError> {
@@ -394,7 +507,13 @@ fn extract_created_scene_id(
             HueApiResponse::Success { success } => {
                 for (key, value) in success {
                     if key.starts_with("/scenes/") {
-                        return Ok(value);
+                        if let Some(scene_id) = scene_id_from_path(&key) {
+                            return Ok(scene_id.to_string());
+                        }
+                    }
+
+                    if let Some(scene_id) = scene_id_from_path(&value) {
+                        return Ok(scene_id.to_string());
                     }
                 }
             }
@@ -405,6 +524,31 @@ fn extract_created_scene_id(
     Err(HueError::UnexpectedResponse(
         "the bridge did not report a created scene identifier",
     ))
+}
+
+fn scene_id_from_path(value: &str) -> Option<&str> {
+    value.strip_prefix("/scenes/").filter(|scene_id| !scene_id.is_empty())
+}
+
+fn recover_created_scene_id(
+    existing_scenes: &[SceneCatalogEntry],
+    refreshed_scenes: &[SceneCatalogEntry],
+    scene_name: &str,
+    group_id: Option<&str>,
+) -> Option<String> {
+    let existing_ids = existing_scenes
+        .iter()
+        .map(|scene| scene.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+
+    refreshed_scenes
+        .iter()
+        .find(|scene| {
+            !existing_ids.contains(scene.id.as_str())
+                && scene.name == scene_name
+                && scene.group_id.as_deref() == group_id
+        })
+        .map(|scene| scene.id.clone())
 }
 
 fn extract_api_error(body: &str) -> HueError {
@@ -596,8 +740,10 @@ fn wrap_hue(hue: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        compare_light_ids, ensure_success_only, extract_api_error, extract_created_scene_id,
-        extract_first_success, ScenePreview,
+        compare_light_ids, ensure_success_body, ensure_success_only, extract_api_error,
+        extract_created_scene_id, extract_created_scene_id_from_body, extract_first_success,
+        group_scene_create_body, recover_created_scene_id, scene_id_from_path, SceneCatalogEntry,
+        ScenePreview,
     };
     use crate::hue::models::{CreateUserSuccessPayload, HueApiResponse, RawHueSceneLightState};
     use std::collections::HashMap;
@@ -628,6 +774,17 @@ mod tests {
         }];
 
         assert!(ensure_success_only(responses).is_ok());
+    }
+
+    #[test]
+    fn accepts_empty_delete_response_body() {
+        assert!(ensure_success_body("", true, true).is_ok());
+        assert!(ensure_success_body("   ", true, true).is_ok());
+    }
+
+    #[test]
+    fn accepts_opaque_delete_success_body() {
+        assert!(ensure_success_body("OK", true, true).is_ok());
     }
 
     #[test]
@@ -678,5 +835,70 @@ mod tests {
         assert_ne!(warm_preview.main, vivid_preview.main);
         assert!(warm_preview.main.starts_with("rgb("));
         assert!(vivid_preview.main.starts_with("rgb("));
+    }
+
+    #[test]
+    fn groupscene_body_uses_group_without_lights_parameter() {
+        let body = group_scene_create_body("Quiet Focus", "7");
+
+        assert_eq!(body["name"], "Quiet Focus");
+        assert_eq!(body["group"], "7");
+        assert_eq!(body["type"], "GroupScene");
+        assert_eq!(body["recycle"], false);
+        assert!(body.get("lights").is_none());
+    }
+
+    #[test]
+    fn extracts_scene_id_from_scene_path() {
+        assert_eq!(scene_id_from_path("/scenes/desk-evening"), Some("desk-evening"));
+        assert_eq!(scene_id_from_path("desk-evening"), None);
+        assert_eq!(scene_id_from_path("/scenes/"), None);
+    }
+
+    #[test]
+    fn created_scene_id_can_come_from_success_key() {
+        let responses = vec![HueApiResponse::Success {
+            success: HashMap::from([("/scenes/desk-evening".to_string(), "created".to_string())]),
+        }];
+
+        let scene_id = extract_created_scene_id(responses).unwrap();
+        assert_eq!(scene_id, "desk-evening");
+    }
+
+    #[test]
+    fn extracts_created_scene_id_from_body_payload() {
+        let body = r#"[{"success":{"/scenes/desk-evening":"created"}}]"#;
+
+        let scene_id = extract_created_scene_id_from_body(body).unwrap();
+        assert_eq!(scene_id, "desk-evening");
+    }
+
+    #[test]
+    fn recovers_created_scene_id_from_scene_catalog_diff() {
+        let before = vec![SceneCatalogEntry {
+            id: "old".to_string(),
+            name: "Read".to_string(),
+            group_id: Some("7".to_string()),
+        }];
+        let after = vec![
+            SceneCatalogEntry {
+                id: "old".to_string(),
+                name: "Read".to_string(),
+                group_id: Some("7".to_string()),
+            },
+            SceneCatalogEntry {
+                id: "new-scene-id".to_string(),
+                name: "Read".to_string(),
+                group_id: Some("8".to_string()),
+            },
+            SceneCatalogEntry {
+                id: "fresh".to_string(),
+                name: "Read".to_string(),
+                group_id: Some("7".to_string()),
+            },
+        ];
+
+        let scene_id = recover_created_scene_id(&before, &after, "Read", Some("7")).unwrap();
+        assert_eq!(scene_id, "fresh");
     }
 }

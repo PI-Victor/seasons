@@ -7,5 +7,6 @@ pub use client::HueBridgeClient;
 pub use config::HueBridgeConfig;
 pub use models::{
     ActivateSceneRequest, BridgeConnection, CreateSceneRequest, CreateUserRequest,
+    DeleteSceneRequest,
     DiscoveredBridge, Group, Light, RegisteredApp, Scene, SetLightStateRequest,
 };

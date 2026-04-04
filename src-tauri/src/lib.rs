@@ -16,6 +16,7 @@ pub fn run() {
             commands::set_hue_light_state,
             commands::activate_hue_scene,
             commands::create_hue_scene,
+            commands::delete_hue_scene,
             commands::load_persisted_bridge_connection,
             commands::save_persisted_bridge_connection,
             commands::clear_persisted_bridge_connection,

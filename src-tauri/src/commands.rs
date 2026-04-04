@@ -9,8 +9,8 @@ use crate::app_state::{
 };
 use crate::hue::{
     ActivateSceneRequest, BridgeConnection, CreateSceneRequest, CreateUserRequest,
-    DiscoveredBridge, Group, HueBridgeClient, HueBridgeConfig, Light, RegisteredApp, Scene,
-    SetLightStateRequest,
+    DeleteSceneRequest, DiscoveredBridge, Group, HueBridgeClient, HueBridgeConfig, Light,
+    RegisteredApp, Scene, SetLightStateRequest,
 };
 use crate::theme::ThemePreference;
 use tauri::AppHandle;
@@ -143,6 +143,24 @@ pub async fn create_hue_scene(request: CreateSceneRequest) -> Result<Scene, Stri
 
     client
         .create_scene(&group_id, &scene_name, &light_ids)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_hue_scene(request: DeleteSceneRequest) -> Result<(), String> {
+    let DeleteSceneRequest {
+        bridge_ip,
+        username,
+        scene_id,
+    } = request;
+
+    let config =
+        HueBridgeConfig::authenticated(bridge_ip, username).map_err(|error| error.to_string())?;
+    let client = HueBridgeClient::new(config).map_err(|error| error.to_string())?;
+
+    client
+        .delete_scene(&scene_id)
         .await
         .map_err(|error| error.to_string())
 }
