@@ -4,8 +4,6 @@ target = "./index.html"
 [watch]
 ignore = [
   "./src-tauri",
-  "./dist-dev",
-  "./dist-build",
   "./target",
 ]
 
