@@ -61,6 +61,22 @@ sudo pacman -S --needed \
   xdotool
 ```
 
+## macOS dependencies
+
+For macOS desktop development, install the Xcode Command Line Tools:
+
+```bash
+xcode-select --install
+```
+
+Audio sync on macOS uses ScreenCaptureKit and also relies on the Swift runtime from the selected Apple developer toolchain. In practice, that means:
+
+- install Xcode Command Line Tools at minimum
+- if you use a full Xcode install, launch it once so setup completes
+- if you have multiple Xcode installs, make sure `xcode-select -p` points at a valid Xcode or Command Line Tools directory
+
+macOS audio sync also requires Screen Recording permission at runtime.
+
 ## Rust / frontend tools
 
 ```bash
@@ -94,4 +110,6 @@ cargo tauri build
 
 - Entertainment audio sync requires a Hue Entertainment area created in the official Hue app.
 - Entertainment audio sync on Linux currently uses PipeWire output capture.
+- Entertainment audio sync on macOS uses ScreenCaptureKit system audio capture and requires Screen Recording permission.
+- If macOS launch fails with `libswift_Concurrency.dylib` missing, the selected Apple developer toolchain is missing the Swift runtime dylibs needed by the ScreenCaptureKit bridge.
 - The saved bridge session and app state are stored in XDG config/data locations, not in browser local storage.

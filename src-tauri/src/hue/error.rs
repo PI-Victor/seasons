@@ -17,7 +17,7 @@ pub enum HueError {
     Io(#[from] std::io::Error),
     #[error("failed to configure DTLS: {0}")]
     Openssl(#[from] openssl::error::ErrorStack),
-    #[error("failed to start Linux audio capture: {0}")]
+    #[error("failed to start audio capture: {0}")]
     AudioCapture(String),
     #[error("failed to stream Hue entertainment data: {0}")]
     EntertainmentStream(String),

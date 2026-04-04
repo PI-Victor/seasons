@@ -220,7 +220,7 @@ pub fn App() -> impl IntoView {
                         set_pipewire_targets.set(Vec::new());
                         set_selected_pipewire_target_object.set(String::new());
                         set_notice.set(Some(UiNotice::warning(
-                            "Could not load PipeWire outputs",
+                            "Could not load audio sources",
                             error,
                         )));
                     }
@@ -758,7 +758,7 @@ pub fn App() -> impl IntoView {
                 };
                 if let Err(error) = storage::save_audio_sync_preferences(&preferences).await {
                     set_notice.set(Some(UiNotice::warning(
-                        "PipeWire output changed, but not persisted",
+                        "Audio source changed, but not persisted",
                         error,
                     )));
                 }

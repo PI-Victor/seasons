@@ -93,7 +93,7 @@ pub fn AudioSyncPanel(
                     </label>
 
                     <label class="theme-field">
-                        <span class="field-label">"PipeWire output"</span>
+                        <span class="field-label">"Audio source"</span>
                         <select
                             class="theme-select"
                             prop:value=selected_pipewire_target_object
@@ -108,7 +108,7 @@ pub fn AudioSyncPanel(
                                             {if is_loading_pipewire_targets.get() {
                                                 "Loading outputs..."
                                             } else {
-                                                "No PipeWire outputs found"
+                                                "No audio sources found"
                                             }}
                                         </option>
                                     }.into_any()
