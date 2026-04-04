@@ -1,10 +1,12 @@
+use crate::desktop;
 use crate::hue::{
     self, curated_room_scenes, preset_light_state, ActivateSceneRequest, BridgeConnection,
     CreateSceneRequest, CreateUserRequest, Group, GroupKind, Light, LightStateUpdate, Scene,
     SetLightStateRequest,
 };
 use crate::storage;
-use crate::ui::{BridgePanel, LightGrid, NoticeTone, StatusBanner, UiNotice};
+use crate::theme::{apply_theme_preference, ThemeMode, ThemePalette, ThemePreference};
+use crate::ui::{BridgePanel, LightGrid, NoticeTone, StatusBanner, ThemePanel, UiNotice};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use std::collections::{HashMap, HashSet};
@@ -35,11 +37,15 @@ pub fn App() -> impl IntoView {
     let (is_connecting, set_is_connecting) = signal(false);
     let (is_refreshing, set_is_refreshing) = signal(false);
     let (did_restore_session, set_did_restore_session) = signal(false);
-    let (pending_light_ids, set_pending_light_ids) = signal(HashSet::<String>::new());
+    let (did_restore_theme, set_did_restore_theme) = signal(false);
     let (pending_scene_id, set_pending_scene_id) = signal(None::<String>);
     let (pending_room_ids, set_pending_room_ids) = signal(HashSet::<String>::new());
     let (pending_room_control_ids, set_pending_room_control_ids) = signal(HashSet::<String>::new());
+    let (pending_light_ids, set_pending_light_ids) = signal(HashSet::<String>::new());
+    let (active_scene_by_group, set_active_scene_by_group) =
+        signal(HashMap::<String, String>::new());
     let (room_order, set_room_order) = signal(Vec::<String>::new());
+    let (theme_preference, set_theme_preference) = signal(ThemePreference::default());
 
     let refresh_bridge_state = Callback::new({
         move |connection: BridgeConnection| {
@@ -57,6 +63,7 @@ pub fn App() -> impl IntoView {
                             set_lights.set(fetched_lights);
                             set_scenes.set(fetched_scenes);
                             set_groups.set(fetched_groups);
+                            set_active_scene_by_group.set(HashMap::new());
                             set_room_order.set(saved_room_order);
                             set_active_connection.set(Some(connection.clone()));
                             if let Err(error) = storage::save_bridge_connection(&connection).await {
@@ -78,6 +85,7 @@ pub fn App() -> impl IntoView {
                             set_lights.set(Vec::new());
                             set_scenes.set(Vec::new());
                             set_groups.set(Vec::new());
+                            set_active_scene_by_group.set(HashMap::new());
                             set_room_order.set(Vec::new());
                             set_notice
                                 .set(Some(UiNotice::error("Could not load bridge data", error)));
@@ -117,6 +125,30 @@ pub fn App() -> impl IntoView {
                 }
             }
         });
+    });
+
+    Effect::new(move |_| {
+        if did_restore_theme.get() {
+            return;
+        }
+
+        set_did_restore_theme.set(true);
+        spawn_local(async move {
+            match storage::load_theme_preference().await {
+                Ok(preference) => set_theme_preference.set(preference),
+                Err(error) => {
+                    set_notice.set(Some(UiNotice::warning(
+                        "Could not restore saved theme",
+                        error,
+                    )));
+                }
+            }
+        });
+    });
+
+    Effect::new(move |_| {
+        let preference = theme_preference.get();
+        let _ = apply_theme_preference(&preference);
     });
 
     let discover_bridges = Callback::new({
@@ -285,91 +317,33 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    let toggle_light = Callback::new({
-        move |light_id: String| {
-            let connection = match active_connection.get_untracked() {
-                Some(connection) => connection,
-                None => {
+    let save_theme_preference = Callback::new({
+        move |preference: ThemePreference| {
+            set_theme_preference.set(preference.clone());
+            spawn_local(async move {
+                if let Err(error) = storage::save_theme_preference(&preference).await {
                     set_notice.set(Some(UiNotice::warning(
-                        "No active bridge connection",
-                        "Connect to a bridge before changing device state.",
+                        "Theme changed, but not persisted",
+                        error,
                     )));
-                    return;
                 }
-            };
-
-            let maybe_light = lights
-                .get_untracked()
-                .into_iter()
-                .find(|light| light.id == light_id);
-
-            let light = match maybe_light {
-                Some(light) => light,
-                None => {
-                    set_notice.set(Some(UiNotice::error(
-                        "Device not found",
-                        "The selected device no longer exists in the current bridge snapshot.",
-                    )));
-                    return;
-                }
-            };
-
-            let request = SetLightStateRequest {
-                bridge_ip: connection.bridge_ip,
-                username: connection.username,
-                light_id: light.id.clone(),
-                state: LightStateUpdate {
-                    on: Some(!light.is_on.unwrap_or(false)),
-                    brightness: None,
-                    saturation: None,
-                    hue: None,
-                    transition_time: Some(3),
-                },
-            };
-
-            run_light_update(
-                request,
-                set_pending_light_ids,
-                set_lights,
-                set_notice,
-                "Device updated",
-            );
+            });
         }
     });
 
-    let set_brightness = Callback::new({
-        move |(light_id, brightness): (String, u8)| {
-            let connection = match active_connection.get_untracked() {
-                Some(connection) => connection,
-                None => {
-                    set_notice.set(Some(UiNotice::warning(
-                        "No active bridge connection",
-                        "Connect to a bridge before changing brightness.",
-                    )));
-                    return;
-                }
-            };
+    let set_theme_mode = Callback::new({
+        move |mode: ThemeMode| {
+            let mut preference = theme_preference.get_untracked();
+            preference.mode = mode;
+            save_theme_preference.run(preference);
+        }
+    });
 
-            let request = SetLightStateRequest {
-                bridge_ip: connection.bridge_ip,
-                username: connection.username,
-                light_id,
-                state: LightStateUpdate {
-                    on: None,
-                    brightness: Some(brightness.max(1)),
-                    saturation: None,
-                    hue: None,
-                    transition_time: Some(4),
-                },
-            };
-
-            run_light_update(
-                request,
-                set_pending_light_ids,
-                set_lights,
-                set_notice,
-                "Brightness updated",
-            );
+    let set_theme_palette = Callback::new({
+        move |palette: ThemePalette| {
+            let mut preference = theme_preference.get_untracked();
+            preference.palette = palette;
+            save_theme_preference.run(preference);
         }
     });
 
@@ -500,6 +474,11 @@ pub fn App() -> impl IntoView {
     let activate_scene = Callback::new({
         move |request: ActivateSceneRequest| {
             let scene_id = request.scene_id.clone();
+            let group_id = request.group_id.clone();
+            let refresh_connection = BridgeConnection {
+                bridge_ip: request.bridge_ip.clone(),
+                username: request.username.clone(),
+            };
             let scene_name = scenes
                 .get_untracked()
                 .into_iter()
@@ -507,15 +486,38 @@ pub fn App() -> impl IntoView {
                 .map(|scene| scene.name)
                 .unwrap_or_else(|| "Scene".to_string());
 
-            set_pending_scene_id.set(Some(scene_id));
+            set_pending_scene_id.set(Some(scene_id.clone()));
             spawn_local(async move {
                 match hue::activate_hue_scene(request).await {
                     Ok(()) => {
-                        set_notice.set(Some(UiNotice::new(
-                            NoticeTone::Success,
-                            "Scene activated",
-                            format!("{scene_name} is now active on the bridge."),
-                        )));
+                        if let Some(group_id) = group_id {
+                            set_active_scene_by_group.update(|active_scenes| {
+                                active_scenes.insert(group_id, scene_id.clone());
+                            });
+                        }
+
+                        let refresh_error = match fetch_bridge_snapshot(refresh_connection).await {
+                            Ok((fetched_lights, fetched_scenes, fetched_groups)) => {
+                                set_lights.set(fetched_lights);
+                                set_scenes.set(fetched_scenes);
+                                set_groups.set(fetched_groups);
+                                None
+                            }
+                            Err(error) => Some(error),
+                        };
+
+                        if let Some(error) = refresh_error {
+                            set_notice.set(Some(UiNotice::warning(
+                                "Scene activated, refresh failed",
+                                format!("{scene_name} is active, but the app could not reload bridge state: {error}"),
+                            )));
+                        } else {
+                            set_notice.set(Some(UiNotice::new(
+                                NoticeTone::Success,
+                                "Scene activated",
+                                format!("{scene_name} is now active on the bridge."),
+                            )));
+                        }
                     }
                     Err(error) => {
                         set_notice.set(Some(UiNotice::error("Scene activation failed", error)));
@@ -524,6 +526,109 @@ pub fn App() -> impl IntoView {
 
                 set_pending_scene_id.set(None);
             });
+        }
+    });
+
+    let toggle_light = Callback::new({
+        move |light_id: String| {
+            let connection = match active_connection.get_untracked() {
+                Some(connection) => connection,
+                None => {
+                    set_notice.set(Some(UiNotice::warning(
+                        "No active bridge connection",
+                        "Connect to a bridge before changing a device.",
+                    )));
+                    return;
+                }
+            };
+
+            let Some(light) = lights
+                .get_untracked()
+                .into_iter()
+                .find(|light| light.id == light_id)
+            else {
+                set_notice.set(Some(UiNotice::warning(
+                    "Device not available",
+                    "The selected device is not available in the current bridge snapshot.",
+                )));
+                return;
+            };
+
+            let should_turn_on = !light.is_on.unwrap_or(false);
+            let request = SetLightStateRequest {
+                bridge_ip: connection.bridge_ip,
+                username: connection.username,
+                light_id: light.id.clone(),
+                state: LightStateUpdate {
+                    on: Some(should_turn_on),
+                    brightness: None,
+                    saturation: None,
+                    hue: None,
+                    transition_time: Some(3),
+                },
+            };
+
+            run_light_update(
+                light.id,
+                request,
+                set_pending_light_ids,
+                set_lights,
+                set_notice,
+                if should_turn_on {
+                    "Device turned on"
+                } else {
+                    "Device turned off"
+                },
+            );
+        }
+    });
+
+    let set_light_brightness = Callback::new({
+        move |(light_id, brightness): (String, u8)| {
+            let connection = match active_connection.get_untracked() {
+                Some(connection) => connection,
+                None => {
+                    set_notice.set(Some(UiNotice::warning(
+                        "No active bridge connection",
+                        "Connect to a bridge before changing device brightness.",
+                    )));
+                    return;
+                }
+            };
+
+            let Some(light) = lights
+                .get_untracked()
+                .into_iter()
+                .find(|light| light.id == light_id)
+            else {
+                set_notice.set(Some(UiNotice::warning(
+                    "Device not available",
+                    "The selected device is not available in the current bridge snapshot.",
+                )));
+                return;
+            };
+
+            let request = SetLightStateRequest {
+                bridge_ip: connection.bridge_ip,
+                username: connection.username,
+                light_id: light.id.clone(),
+                state: LightStateUpdate {
+                    on: Some(true),
+                    brightness: Some(brightness.max(1)),
+                    saturation: None,
+                    hue: None,
+                    transition_time: Some(4),
+                },
+            };
+
+            run_light_update(
+                light.id,
+                request,
+                set_pending_light_ids,
+                set_lights,
+                set_notice,
+                "Device brightness updated",
+            );
         }
     });
 
@@ -710,6 +815,16 @@ pub fn App() -> impl IntoView {
             .filter(|light| light.is_on.unwrap_or(false))
             .count()
     });
+
+    let quit_application = Callback::new({
+        move |()| {
+            spawn_local(async move {
+                if let Err(error) = desktop::quit_app().await {
+                    set_notice.set(Some(UiNotice::error("Could not close the app", error)));
+                }
+            });
+        }
+    });
     let reachable_light_count = Signal::derive(move || {
         lights
             .get()
@@ -742,6 +857,9 @@ pub fn App() -> impl IntoView {
                     >
                         {move || if page.get() == AppPage::Home { "Settings" } else { "Back to devices" }}
                     </button>
+                    <button class="ghost-button quit-button" on:click=move |_| quit_application.run(())>
+                        "Quit"
+                    </button>
                 </div>
             </header>
 
@@ -773,20 +891,12 @@ pub fn App() -> impl IntoView {
             {move || {
                 if page.get() == AppPage::Settings {
                     view! {
-                        <section class="settings-shell surface-panel">
-                            <div class="settings-header">
-                                <div>
-                                    <p class="panel-kicker">"Settings"</p>
-                                    <h2>"Bridge management"</h2>
-                                </div>
-                                <button class="secondary-button" on:click=move |_| forget_bridge.run(())>
-                                    "Forget saved bridge"
-                                </button>
-                            </div>
-
-                            <p class="panel-copy">
-                                "Bridge setup is intentionally kept off the main page. Pair once here, then return to the device view for daily use."
-                            </p>
+                        <section class="settings-stack">
+                            <ThemePanel
+                                theme_preference=theme_preference
+                                on_palette_change=set_theme_palette
+                                on_mode_change=set_theme_mode
+                            />
 
                             <BridgePanel
                                 discovered_bridges=discovered_bridges
@@ -804,6 +914,7 @@ pub fn App() -> impl IntoView {
                                 on_discover=discover_bridges
                                 on_connect=connect_bridge
                                 on_register=pair_new_app
+                                on_forget=forget_bridge
                             />
                         </section>
                     }.into_any()
@@ -815,17 +926,18 @@ pub fn App() -> impl IntoView {
                                 groups=groups
                                 scenes=scenes
                                 room_order=room_order
-                                pending_light_ids=pending_light_ids
                                 pending_scene_id=pending_scene_id
                                 pending_room_ids=pending_room_ids
                                 pending_room_control_ids=pending_room_control_ids
+                                pending_light_ids=pending_light_ids
+                                active_scene_by_group=active_scene_by_group
                                 active_connection=active_connection
                                 is_refreshing=is_refreshing
                                 on_open_settings=Callback::new(move |_| set_page.set(AppPage::Settings))
-                                on_toggle_light=toggle_light
-                                on_set_brightness=set_brightness
                                 on_toggle_room=toggle_room
                                 on_set_room_brightness=set_room_brightness
+                                on_toggle_light=toggle_light
+                                on_set_light_brightness=set_light_brightness
                                 on_activate_scene=activate_scene
                                 on_create_curated_scenes=create_curated_room_scenes
                                 on_reorder_rooms=reorder_rooms
@@ -836,45 +948,6 @@ pub fn App() -> impl IntoView {
             }}
         </main>
     }
-}
-
-fn run_light_update(
-    request: SetLightStateRequest,
-    set_pending_light_ids: WriteSignal<HashSet<String>>,
-    set_lights: WriteSignal<Vec<Light>>,
-    set_notice: WriteSignal<Option<UiNotice>>,
-    success_title: &'static str,
-) {
-    let light_id = request.light_id.clone();
-    let state = request.state.clone();
-
-    set_pending_light_ids.update(|pending| {
-        pending.insert(light_id.clone());
-    });
-
-    spawn_local(async move {
-        match hue::set_hue_light_state(request).await {
-            Ok(()) => {
-                set_lights.update(|lights| {
-                    if let Some(light) = lights.iter_mut().find(|light| light.id == light_id) {
-                        apply_state_update(light, &state);
-                    }
-                });
-                set_notice.set(Some(UiNotice::new(
-                    NoticeTone::Success,
-                    success_title,
-                    "The latest change was accepted by the bridge.",
-                )));
-            }
-            Err(error) => {
-                set_notice.set(Some(UiNotice::error("Device update failed", error)));
-            }
-        }
-
-        set_pending_light_ids.update(|pending| {
-            pending.remove(&light_id);
-        });
-    });
 }
 
 fn run_room_update(
@@ -930,6 +1003,44 @@ fn run_room_update(
 
         set_pending_room_control_ids.update(|pending| {
             pending.remove(&room_id);
+        });
+    });
+}
+
+fn run_light_update(
+    light_id: String,
+    request: SetLightStateRequest,
+    set_pending_light_ids: WriteSignal<HashSet<String>>,
+    set_lights: WriteSignal<Vec<Light>>,
+    set_notice: WriteSignal<Option<UiNotice>>,
+    success_title: &'static str,
+) {
+    let state = request.state.clone();
+    set_pending_light_ids.update(|pending| {
+        pending.insert(light_id.clone());
+    });
+
+    spawn_local(async move {
+        match hue::set_hue_light_state(request).await {
+            Ok(()) => {
+                set_lights.update(|lights| {
+                    if let Some(light) = lights.iter_mut().find(|light| light.id == light_id) {
+                        apply_state_update(light, &state);
+                    }
+                });
+                set_notice.set(Some(UiNotice::new(
+                    NoticeTone::Success,
+                    success_title,
+                    "The latest device change was accepted by the bridge.",
+                )));
+            }
+            Err(error) => {
+                set_notice.set(Some(UiNotice::error("Device update failed", error)));
+            }
+        }
+
+        set_pending_light_ids.update(|pending| {
+            pending.remove(&light_id);
         });
     });
 }

@@ -4,18 +4,20 @@
   "version": "0.1.0",
   "identifier": "io.cloudflavor.seasons",
   "build": {
-    "beforeDevCommand": "trunk serve",
+    "beforeDevCommand": "CARGO_TARGET_DIR=target/trunk-dev trunk serve --dist dist-dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "trunk build",
-    "frontendDist": "../dist"
+    "beforeBuildCommand": "CARGO_TARGET_DIR=target/trunk-build trunk build --dist dist-build",
+    "frontendDist": "../dist-build"
   },
   "app": {
     "withGlobalTauri": true,
     "windows": [
       {
         "title": "seasons",
-        "width": 800,
-        "height": 600
+        "width": 645,
+        "minWidth": 645,
+        "maxWidth": 645,
+        "height": 932
       }
     ],
     "security": {

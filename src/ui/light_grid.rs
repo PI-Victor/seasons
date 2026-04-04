@@ -1,6 +1,6 @@
 use crate::hue::{ActivateSceneRequest, BridgeConnection, Group, GroupKind, Light, Scene};
 use leptos::prelude::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use wasm_bindgen::{JsCast, JsValue};
 
 #[component]
@@ -9,17 +9,18 @@ pub fn LightGrid(
     groups: ReadSignal<Vec<Group>>,
     scenes: ReadSignal<Vec<Scene>>,
     room_order: ReadSignal<Vec<String>>,
-    pending_light_ids: ReadSignal<HashSet<String>>,
     pending_scene_id: ReadSignal<Option<String>>,
     pending_room_ids: ReadSignal<HashSet<String>>,
     pending_room_control_ids: ReadSignal<HashSet<String>>,
+    pending_light_ids: ReadSignal<HashSet<String>>,
+    active_scene_by_group: ReadSignal<HashMap<String, String>>,
     active_connection: ReadSignal<Option<BridgeConnection>>,
     is_refreshing: ReadSignal<bool>,
     on_open_settings: Callback<()>,
-    on_toggle_light: Callback<String>,
-    on_set_brightness: Callback<(String, u8)>,
     on_toggle_room: Callback<String>,
     on_set_room_brightness: Callback<(String, u8)>,
+    on_toggle_light: Callback<String>,
+    on_set_light_brightness: Callback<(String, u8)>,
     on_activate_scene: Callback<ActivateSceneRequest>,
     on_create_curated_scenes: Callback<String>,
     on_reorder_rooms: Callback<Vec<String>>,
@@ -28,8 +29,8 @@ pub fn LightGrid(
     let (drop_target_room_id, set_drop_target_room_id) = signal(None::<String>);
 
     view! {
-        <section class="panel surface-panel light-panel">
-            <div class="panel-header compact-panel-header">
+        <section class="light-panel">
+            <div class="panel-header compact-panel-header light-panel-header">
                 <div>
                     <p class="panel-kicker">"Rooms"</p>
                     <h2>"Main residence"</h2>
@@ -101,6 +102,8 @@ pub fn LightGrid(
                                     } else {
                                         "room-card"
                                     };
+                                    let room_style = room_accent_style(&room.lights)
+                                        .unwrap_or_default();
                                     let room_drag_class = if drop_target_room_id.get().as_deref()
                                         == Some(room_id.as_str())
                                     {
@@ -135,15 +138,32 @@ pub fn LightGrid(
                                                     scene_id: scene.id.clone(),
                                                     group_id: scene.group_id.clone(),
                                                 });
-                                                let preview_class = scene_preview_class(&scene.name);
+                                                let preview_style = scene_preview_style(&scene);
                                                 let scene_type = scene
                                                     .scene_type
                                                     .clone()
                                                     .unwrap_or_else(|| "Scene".to_string());
+                                                let is_active_scene = scene
+                                                    .group_id
+                                                    .as_deref()
+                                                    .and_then(|group_id| {
+                                                        active_scene_by_group
+                                                            .get()
+                                                            .get(group_id)
+                                                            .cloned()
+                                                    })
+                                                    .as_deref()
+                                                    == Some(scene.id.as_str());
+                                                let scene_class = if is_active_scene {
+                                                    "scene-thumb is-active"
+                                                } else {
+                                                    "scene-thumb"
+                                                };
 
                                                 view! {
                                                     <button
-                                                        class="scene-thumb"
+                                                        class=scene_class
+                                                        style=preview_style
                                                         disabled=is_pending
                                                         on:click=move |_| {
                                                             if let Some(request) = request.clone() {
@@ -151,7 +171,9 @@ pub fn LightGrid(
                                                             }
                                                         }
                                                     >
-                                                        <span class=format!("scene-thumb-art {preview_class}")></span>
+                                                        <span class="scene-thumb-art-shell">
+                                                            <span class="scene-thumb-art"></span>
+                                                        </span>
                                                         <span class="scene-thumb-copy">
                                                             <strong>{scene.name}</strong>
                                                             <small>{scene_type}</small>
@@ -164,7 +186,7 @@ pub fn LightGrid(
                                     };
 
                                     view! {
-                                        <details class=room_drag_class>
+                                        <details class=room_drag_class style=room_style>
                                             <summary
                                                 class="room-card-summary"
                                                 on:dragover=move |ev| {
@@ -251,7 +273,6 @@ pub fn LightGrid(
                                                             <span>{format!("{room_active_count} on")}</span>
                                                             <span>{room_brightness_label.clone()}</span>
                                                         </div>
-                                                        <span class="room-collapse-hint">"Collapse"</span>
                                                     </div>
                                                 </div>
                                                 <div
@@ -287,47 +308,39 @@ pub fn LightGrid(
                                             </summary>
 
                                             <div class="room-card-body">
-                                                <div class="room-strip-block">
-                                                    <div class="room-strip-header">
-                                                        <span class="room-strip-label">"Scenes"</span>
-                                                        <div class="room-strip-actions">
-                                                            {if can_craft_scenes {
-                                                                view! {
-                                                                    <button
-                                                                        class="secondary-button room-action-button"
-                                                                        disabled=is_creating_scenes
-                                                                        on:click=move |_| on_create_curated_scenes.run(craft_room_id.clone())
-                                                                    >
-                                                                        {if is_creating_scenes {
-                                                                            "Crafting..."
-                                                                        } else {
-                                                                            "Craft curated scenes"
-                                                                        }}
-                                                                    </button>
-                                                                }
-                                                                    .into_any()
-                                                            } else {
-                                                                view! { <span class="room-strip-muted">"Bridge room required"</span> }.into_any()
-                                                            }}
-                                                        </div>
-                                                    </div>
-                                                    <div class="room-scene-strip">
-                                                        {scene_strip}
+                                                <div class="room-strip-header">
+                                                    <span class="room-strip-label">"Scenes"</span>
+                                                    <div class="room-strip-actions">
+                                                        {if can_craft_scenes {
+                                                            view! {
+                                                                <button
+                                                                    class="secondary-button room-action-button"
+                                                                    disabled=is_creating_scenes
+                                                                    on:click=move |_| on_create_curated_scenes.run(craft_room_id.clone())
+                                                                >
+                                                                    {if is_creating_scenes {
+                                                                        "Crafting..."
+                                                                    } else {
+                                                                        "Craft curated scenes"
+                                                                    }}
+                                                                </button>
+                                                            }
+                                                                .into_any()
+                                                        } else {
+                                                            view! { <span class="room-strip-muted">"Bridge room required"</span> }.into_any()
+                                                        }}
                                                     </div>
                                                 </div>
+                                                <div class="room-scene-strip">
+                                                    {scene_strip}
+                                                </div>
 
-                                                <div class="room-strip-block">
-                                                    <span class="room-strip-label">"Lights"</span>
-                                                    <div class="device-list">
-                                                        {room
-                                                            .lights
-                                                            .into_iter()
-                                                            .map(|light| {
-                                                        let light_id = light.id.clone();
-                                                        let toggle_light_id = light.id.clone();
-                                                        let brightness_light_id = light.id.clone();
-                                                        let slider_id = format!("brightness-{}", light.id);
-                                                        let is_pending = pending_light_ids.get().contains(&light_id);
+                                                <span class="room-strip-label">"Lights"</span>
+                                                <div class="device-list">
+                                                    {room
+                                                        .lights
+                                                        .into_iter()
+                                                        .map(|light| {
                                                         let placement = derive_placement(&light.id, &groups.get());
                                                         let light_name = light.name.clone();
                                                         let light_type = light
@@ -339,78 +352,73 @@ pub fn LightGrid(
                                                         } else {
                                                             "Unavailable"
                                                         };
-                                                        let brightness_value = light.brightness.unwrap_or(127);
+                                                        let light_title = light_name.clone();
                                                         let is_on = light.is_on.unwrap_or(false);
+                                                        let brightness_text = brightness_label(light.brightness.unwrap_or(0));
+                                                        let brightness_value = light.brightness.unwrap_or(1).max(1);
+                                                        let light_style = light_accent_style(&light).unwrap_or_default();
+                                                        let toggle_light_id = light.id.clone();
+                                                        let set_light_brightness_id = light.id.clone();
+                                                        let is_pending = pending_light_ids.get().contains(&light.id);
+                                                        let light_icon_class = device_icon_class(&light);
+                                                        let zone_text = if placement.zone_names.is_empty() {
+                                                            "No zones".to_string()
+                                                        } else {
+                                                            placement.zone_names.join(", ")
+                                                        };
 
                                                         view! {
-                                                            <article class="light-card compact-light-card">
+                                                            <article class="light-card compact-light-card" style=light_style>
                                                                 <div class="light-card-top">
-                                                                    <div>
+                                                                    <div class="light-card-identity">
+                                                                        <span class="light-icon-shell">
+                                                                            <span class=format!("{light_icon_class} fa-fw light-icon-glyph") aria-hidden="true"></span>
+                                                                        </span>
+                                                                        <div class="light-card-copy">
                                                                         <p class="light-eyebrow">{light_type}</p>
-                                                                        <h3>{light_name}</h3>
+                                                                        <h3 title=light_title>{light_name}</h3>
+                                                                        <p class="light-subcopy">{zone_text}</p>
+                                                                        </div>
                                                                     </div>
-                                                                    <div class="light-status" class:is-off=move || !is_on>
-                                                                        <span class="status-dot"></span>
-                                                                        <span>{if is_on { "On" } else { "Off" }}</span>
-                                                                    </div>
-                                                                </div>
-
-                                                                <div class="light-meta-cluster">
-                                                                    <span class="light-meta-chip">
-                                                                        {if placement.zone_names.is_empty() {
-                                                                            "No zones".to_string()
-                                                                        } else {
-                                                                            placement.zone_names.join(", ")
-                                                                        }}
-                                                                    </span>
-                                                                    <span class="light-meta-chip">{format!("ID {}", light.id)}</span>
-                                                                    <span class="light-meta-chip">{reachable_text}</span>
-                                                                </div>
-
-                                                                <div class="device-actions">
                                                                     <button
-                                                                        class="toggle-button compact-toggle-button"
-                                                                        class:is-active=move || is_on
+                                                                        class="light-status-button"
+                                                                        class:is-off=move || !is_on
                                                                         disabled=is_pending
                                                                         on:click=move |_| on_toggle_light.run(toggle_light_id.clone())
                                                                     >
-                                                                        {move || {
-                                                                            if is_pending {
-                                                                                "Updating..."
-                                                                            } else if is_on {
-                                                                                "Turn off"
-                                                                            } else {
-                                                                                "Turn on"
-                                                                            }
-                                                                        }}
+                                                                        <span class="status-dot"></span>
+                                                                        <span>{if is_on { "On" } else { "Off" }}</span>
                                                                     </button>
+                                                                </div>
 
-                                                                    <label class="brightness-block compact-brightness-block" for=slider_id.clone()>
-                                                                        <div class="brightness-header">
-                                                                            <span>"Brightness"</span>
-                                                                            <strong>{brightness_label(brightness_value)}</strong>
-                                                                        </div>
-                                                                        <input
-                                                                            id=slider_id.clone()
-                                                                            class="brightness-slider"
-                                                                            type="range"
-                                                                            min="1"
-                                                                            max="254"
-                                                                            value=brightness_value.to_string()
-                                                                            disabled=is_pending
-                                                                            on:change=move |ev| {
-                                                                                if let Ok(value) = event_target_value(&ev).parse::<u8>() {
-                                                                                    on_set_brightness.run((brightness_light_id.clone(), value));
-                                                                                }
+                                                                <div class="light-meta-cluster">
+                                                                    <span class="light-meta-chip">{brightness_text.clone()}</span>
+                                                                    <span class="light-meta-chip">{reachable_text}</span>
+                                                                </div>
+
+                                                                <div class="device-inline-control">
+                                                                    <div class="device-inline-copy">
+                                                                        <span class="device-inline-label">"Brightness"</span>
+                                                                        <strong>{brightness_text}</strong>
+                                                                    </div>
+                                                                    <input
+                                                                        class="brightness-slider device-brightness-slider"
+                                                                        type="range"
+                                                                        min="1"
+                                                                        max="254"
+                                                                        value=brightness_value.to_string()
+                                                                        disabled=is_pending || !light.reachable.unwrap_or(true)
+                                                                        on:change=move |ev| {
+                                                                            if let Ok(value) = event_target_value(&ev).parse::<u8>() {
+                                                                                on_set_light_brightness.run((set_light_brightness_id.clone(), value));
                                                                             }
-                                                                        />
-                                                                    </label>
+                                                                        }
+                                                                    />
                                                                 </div>
                                                             </article>
                                                         }
-                                                            })
-                                                            .collect_view()}
-                                                    </div>
+                                                        })
+                                                        .collect_view()}
                                                 </div>
                                             </div>
                                         </details>
@@ -586,18 +594,242 @@ fn brightness_label(value: u8) -> String {
     format!("{percentage}%")
 }
 
-fn scene_preview_class(name: &str) -> &'static str {
-    let lower = name.to_ascii_lowercase();
-    if lower.contains("sunset") || lower.contains("gold") || lower.contains("amber") {
-        "is-sunset"
-    } else if lower.contains("ocean") || lower.contains("blue") || lower.contains("arctic") {
-        "is-ocean"
-    } else if lower.contains("forest") || lower.contains("spring") || lower.contains("green") {
-        "is-forest"
-    } else if lower.contains("night") || lower.contains("focus") || lower.contains("dim") {
-        "is-night"
+fn scene_preview_style(scene: &Scene) -> String {
+    if let (Some(soft), Some(main), Some(deep)) = (
+        scene.preview_color_soft.as_deref(),
+        scene.preview_color_main.as_deref(),
+        scene.preview_color_deep.as_deref(),
+    ) {
+        return format!(
+            "--scene-color-soft: {soft}; --scene-color-main: {main}; --scene-color-deep: {deep};"
+        );
+    }
+
+    let (mut hue, mut saturation, mut value) = fallback_scene_palette_seed(&scene.name);
+    let lower = scene.name.to_ascii_lowercase();
+    let tone = classify_scene_tone(&lower);
+    let variation = hashed_scene_variation(&scene.name);
+
+    hue = wrap_hue(hue + tone.hue_shift + variation.hue_shift);
+    saturation =
+        (saturation + tone.saturation_shift + variation.saturation_shift).clamp(0.44, 0.88);
+    value = (value + tone.value_shift + variation.value_shift).clamp(0.82, 0.99);
+
+    let soft = hsv_to_rgb_float(
+        hue,
+        (saturation * 0.58).clamp(0.26, 0.62),
+        (value + 0.06).clamp(0.9, 1.0),
+    );
+    let main = hsv_to_rgb_float(hue, saturation, value);
+    let deep = hsv_to_rgb_float(
+        wrap_hue(hue - 12.0),
+        (saturation * 0.96).clamp(0.42, 0.9),
+        (value - 0.2).clamp(0.52, 0.84),
+    );
+
+    format!(
+        "--scene-color-soft: rgb({} {} {}); --scene-color-main: rgb({} {} {}); --scene-color-deep: rgb({} {} {});",
+        soft.0, soft.1, soft.2, main.0, main.1, main.2, deep.0, deep.1, deep.2
+    )
+}
+
+fn room_accent_style(lights: &[Light]) -> Option<String> {
+    average_accent_color(lights).map(|color| format!("--bridge-accent: {color};"))
+}
+
+fn light_accent_style(light: &Light) -> Option<String> {
+    light_accent_color(light).map(|color| format!("--bridge-accent: {color};"))
+}
+
+fn average_accent_color(lights: &[Light]) -> Option<String> {
+    let preferred_lights: Vec<&Light> = lights
+        .iter()
+        .filter(|light| light.is_on.unwrap_or(false))
+        .collect();
+    let source_lights = if preferred_lights.is_empty() {
+        lights.iter().collect::<Vec<_>>()
     } else {
-        "is-default"
+        preferred_lights
+    };
+
+    let colors: Vec<(u8, u8, u8)> = source_lights
+        .into_iter()
+        .filter_map(light_accent_rgb)
+        .collect();
+
+    if colors.is_empty() {
+        return None;
+    }
+
+    let count = colors.len() as u32;
+    let (red_sum, green_sum, blue_sum) = colors.into_iter().fold(
+        (0_u32, 0_u32, 0_u32),
+        |(red_sum, green_sum, blue_sum), (red, green, blue)| {
+            (
+                red_sum + u32::from(red),
+                green_sum + u32::from(green),
+                blue_sum + u32::from(blue),
+            )
+        },
+    );
+
+    Some(format!(
+        "rgb({} {} {})",
+        red_sum / count,
+        green_sum / count,
+        blue_sum / count
+    ))
+}
+
+fn light_accent_color(light: &Light) -> Option<String> {
+    light_accent_rgb(light).map(|(red, green, blue)| format!("rgb({red} {green} {blue})"))
+}
+
+fn light_accent_rgb(light: &Light) -> Option<(u8, u8, u8)> {
+    let brightness = light.brightness?;
+    if brightness == 0 {
+        return None;
+    }
+
+    let hue = light.hue.unwrap_or(8_000);
+    let saturation = light.saturation.unwrap_or(40);
+    Some(hsv_to_ui_rgb(hue, saturation, brightness))
+}
+
+fn device_icon_class(light: &Light) -> &'static str {
+    let light_type = light
+        .light_type
+        .as_deref()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    if light_type.contains("strip") {
+        "fa-solid fa-grip-lines-vertical"
+    } else if light_type.contains("plug") {
+        "fa-solid fa-plug"
+    } else {
+        "fa-solid fa-lightbulb"
+    }
+}
+
+fn hsv_to_ui_rgb(hue: u16, saturation: u8, brightness: u8) -> (u8, u8, u8) {
+    let hue = f32::from(hue) * 360.0 / 65_535.0;
+    let saturation = (f32::from(saturation) / 254.0).clamp(0.38, 0.96);
+    let brightness_ratio = f32::from(brightness) / 254.0;
+    let value = (0.86 + brightness_ratio * 0.12).clamp(0.86, 0.98);
+
+    hsv_to_rgb_float(hue, saturation, value)
+}
+
+fn hsv_to_rgb_float(hue: f32, saturation: f32, value: f32) -> (u8, u8, u8) {
+    let hue = wrap_hue(hue);
+
+    if saturation <= f32::EPSILON {
+        let channel = (value * 255.0).round() as u8;
+        return (channel, channel, channel);
+    }
+
+    let chroma = value * saturation;
+    let hue_sector = hue / 60.0;
+    let secondary = chroma * (1.0 - ((hue_sector % 2.0) - 1.0).abs());
+    let match_value = value - chroma;
+
+    let (red, green, blue) = match hue_sector as u8 {
+        0 => (chroma, secondary, 0.0),
+        1 => (secondary, chroma, 0.0),
+        2 => (0.0, chroma, secondary),
+        3 => (0.0, secondary, chroma),
+        4 => (secondary, 0.0, chroma),
+        _ => (chroma, 0.0, secondary),
+    };
+
+    (
+        ((red + match_value) * 255.0).round() as u8,
+        ((green + match_value) * 255.0).round() as u8,
+        ((blue + match_value) * 255.0).round() as u8,
+    )
+}
+
+fn wrap_hue(hue: f32) -> f32 {
+    let wrapped = hue % 360.0;
+    if wrapped < 0.0 {
+        wrapped + 360.0
+    } else {
+        wrapped
+    }
+}
+
+fn fallback_scene_palette_seed(name: &str) -> (f32, f32, f32) {
+    let hash = name.bytes().fold(0_u32, |hash, byte| {
+        hash.wrapping_mul(37).wrapping_add(u32::from(byte))
+    });
+
+    let hue = (hash % 360) as f32;
+    let saturation = 0.66 + (((hash >> 8) % 17) as f32 / 100.0);
+    let value = 0.9 + (((hash >> 16) % 7) as f32 / 100.0);
+
+    (hue, saturation.clamp(0.66, 0.82), value.clamp(0.9, 0.97))
+}
+
+#[derive(Clone, Copy)]
+struct SceneTone {
+    hue_shift: f32,
+    saturation_shift: f32,
+    value_shift: f32,
+}
+
+fn classify_scene_tone(name: &str) -> SceneTone {
+    if name.contains("sunset") || name.contains("gold") || name.contains("amber") {
+        SceneTone {
+            hue_shift: 0.0,
+            saturation_shift: 0.06,
+            value_shift: 0.05,
+        }
+    } else if name.contains("ocean") || name.contains("blue") || name.contains("arctic") {
+        SceneTone {
+            hue_shift: 200.0,
+            saturation_shift: 0.02,
+            value_shift: -0.04,
+        }
+    } else if name.contains("forest") || name.contains("spring") || name.contains("green") {
+        SceneTone {
+            hue_shift: 120.0,
+            saturation_shift: 0.02,
+            value_shift: 0.0,
+        }
+    } else if name.contains("night") || name.contains("focus") || name.contains("dim") {
+        SceneTone {
+            hue_shift: 280.0,
+            saturation_shift: -0.02,
+            value_shift: -0.1,
+        }
+    } else if name.contains("read") || name.contains("relax") || name.contains("soft") {
+        SceneTone {
+            hue_shift: 36.0,
+            saturation_shift: -0.1,
+            value_shift: 0.04,
+        }
+    } else {
+        SceneTone {
+            hue_shift: 0.0,
+            saturation_shift: 0.0,
+            value_shift: 0.02,
+        }
+    }
+}
+
+fn hashed_scene_variation(name: &str) -> SceneTone {
+    let hash = name.bytes().fold(0_u32, |hash, byte| {
+        hash.wrapping_mul(33).wrapping_add(u32::from(byte))
+    });
+    let hue_shift = ((hash % 31) as f32 - 15.0) * 2.8;
+    let saturation_shift = (((hash >> 8) % 11) as f32 - 5.0) * 0.016;
+    let value_shift = (((hash >> 16) % 9) as f32 - 4.0) * 0.012;
+
+    SceneTone {
+        hue_shift,
+        saturation_shift,
+        value_shift,
     }
 }
 

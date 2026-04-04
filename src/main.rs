@@ -1,6 +1,8 @@
 mod app;
+mod desktop;
 mod hue;
 mod storage;
+mod theme;
 mod ui;
 
 use app::*;

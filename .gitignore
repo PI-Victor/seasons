@@ -1,4 +1,8 @@
 /dist/
+/dist-dev/
+/dist-build/
+/target/trunk-dev/
+/target/trunk-build/
 /target/
 /.codex
 /.vscode/

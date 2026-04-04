@@ -18,25 +18,31 @@ pub fn BridgePanel(
     on_discover: Callback<()>,
     on_connect: Callback<()>,
     on_register: Callback<()>,
+    on_forget: Callback<()>,
 ) -> impl IntoView {
     view! {
-        <section class="panel surface-panel bridge-panel">
+        <section class="bridge-panel surface-panel">
             <div class="panel-header">
                 <div>
-                    <p class="panel-kicker">"Bridge"</p>
-                    <h2>"Connect to your home"</h2>
+                    <p class="panel-kicker">"Settings"</p>
+                    <h2>"Bridge management"</h2>
                 </div>
-                <button
-                    class="ghost-button"
-                    on:click=move |_| on_discover.run(())
-                    disabled=move || is_discovering.get()
-                >
-                    {move || if is_discovering.get() { "Scanning..." } else { "Discover bridges" }}
-                </button>
+                <div class="bridge-header-actions">
+                    <button class="secondary-button compact-button" on:click=move |_| on_forget.run(())>
+                        "Forget saved bridge"
+                    </button>
+                    <button
+                        class="ghost-button"
+                        on:click=move |_| on_discover.run(())
+                        disabled=move || is_discovering.get()
+                    >
+                        {move || if is_discovering.get() { "Scanning..." } else { "Discover bridges" }}
+                    </button>
+                </div>
             </div>
 
             <p class="panel-copy">
-                "Pick a bridge on your LAN, reconnect with an existing app username, or pair a new desktop app using the bridge button."
+                "Bridge setup stays here. Reconnect with an existing app username or pair a new desktop app once with the bridge button."
             </p>
 
             <div class="bridge-chip-list">
@@ -123,7 +129,7 @@ pub fn BridgePanel(
                 </div>
             </div>
 
-            <div class="pairing-card">
+            <div class="bridge-subsection">
                 <div class="pairing-copy">
                     <p class="panel-kicker">"Pairing"</p>
                     <h3>"Register this desktop app"</h3>
