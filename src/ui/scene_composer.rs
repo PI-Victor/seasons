@@ -136,10 +136,18 @@ fn read_wheel_selection(event: &MouseEvent) -> Option<(u16, u8)> {
         .ok()?;
     let rect = rect_fn.call0(&target).ok()?;
 
-    let left = Reflect::get(&rect, &JsValue::from_str("left")).ok()?.as_f64()?;
-    let top = Reflect::get(&rect, &JsValue::from_str("top")).ok()?.as_f64()?;
-    let width = Reflect::get(&rect, &JsValue::from_str("width")).ok()?.as_f64()?;
-    let height = Reflect::get(&rect, &JsValue::from_str("height")).ok()?.as_f64()?;
+    let left = Reflect::get(&rect, &JsValue::from_str("left"))
+        .ok()?
+        .as_f64()?;
+    let top = Reflect::get(&rect, &JsValue::from_str("top"))
+        .ok()?
+        .as_f64()?;
+    let width = Reflect::get(&rect, &JsValue::from_str("width"))
+        .ok()?
+        .as_f64()?;
+    let height = Reflect::get(&rect, &JsValue::from_str("height"))
+        .ok()?
+        .as_f64()?;
 
     let radius = width.min(height) / 2.0;
     if radius <= f64::EPSILON {

@@ -42,7 +42,8 @@ pub fn LightGrid(
             .filter(|light| light.is_on.unwrap_or(false))
             .count()
     });
-    let is_updating_home = Signal::derive(move || pending_room_control_ids.get().contains("__all__"));
+    let is_updating_home =
+        Signal::derive(move || pending_room_control_ids.get().contains("__all__"));
 
     view! {
         <section class="light-panel">
@@ -52,14 +53,6 @@ pub fn LightGrid(
                     <h2>"Main residence"</h2>
                 </div>
                 <div class="light-panel-actions">
-                    <div class="panel-badge">
-                        {move || {
-                            active_connection
-                                .get()
-                                .map(|connection| connection.bridge_ip)
-                                .unwrap_or_else(|| "Not connected".to_string())
-                        }}
-                    </div>
                     <button
                         class=move || {
                             if home_active_count.get() > 0 {
@@ -157,7 +150,6 @@ pub fn LightGrid(
                                     let craft_room_id = room_id.clone();
                                     let custom_scene_room_id = room_id.clone();
                                     let toggle_room_id = room_id.clone();
-                                    let wheel_room_brightness_id = room_id.clone();
                                     let slider_room_brightness_id = room_id.clone();
                                     let is_creating_scenes = pending_room_ids.get().contains(&room_id);
                                     let is_updating_room = pending_room_control_ids.get().contains(&room_id);
@@ -250,24 +242,6 @@ pub fn LightGrid(
                                         <details class=room_drag_class style=room_style>
                                             <summary
                                                 class="room-card-summary"
-                                                on:wheel=move |ev| {
-                                                    if is_updating_room {
-                                                        return;
-                                                    }
-
-                                                    let next_brightness = adjust_brightness_from_wheel(
-                                                        room_average_brightness,
-                                                        ev.delta_y(),
-                                                    );
-
-                                                    if next_brightness == room_average_brightness.max(1) {
-                                                        return;
-                                                    }
-
-                                                    ev.prevent_default();
-                                                    ev.stop_propagation();
-                                                    on_set_room_brightness.run((wheel_room_brightness_id.clone(), next_brightness));
-                                                }
                                                 on:dragover=move |ev| {
                                                     ev.prevent_default();
                                                     set_drop_effect(&ev, "move");
@@ -703,19 +677,6 @@ fn derive_placement(light_id: &str, groups: &[Group]) -> LightPlacement {
 fn brightness_label(value: u8) -> String {
     let percentage = (u16::from(value) * 100) / 254;
     format!("{percentage}%")
-}
-
-fn adjust_brightness_from_wheel(current: u8, delta_y: f64) -> u8 {
-    let current = current.max(1);
-    let step = 5;
-
-    if delta_y < 0.0 {
-        current.saturating_add(step).min(254)
-    } else if delta_y > 0.0 {
-        current.saturating_sub(step).max(1)
-    } else {
-        current
-    }
 }
 
 fn scene_preview_style(scene: &Scene) -> String {

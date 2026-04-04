@@ -1,7 +1,10 @@
-# Tauri + Leptos
+Seasons
+---
 
-This template should help get you started developing with Tauri and Leptos.
+An unofficial cross platform application based on Tauri to control 
+Phillips Hue Lights and Devices.  
+This application tries to bring to Linux specifically the features 
+that the MacOS app has, including audio sync.  
 
-## Recommended IDE Setup
 
-[VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer).
+
