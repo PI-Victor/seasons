@@ -1,12 +1,14 @@
 use crate::desktop;
 use crate::hue::{
     self, curated_room_scenes, preset_light_state, ActivateSceneRequest, BridgeConnection,
-    CreateSceneRequest, CreateUserRequest, Group, GroupKind, Light, LightStateUpdate, Scene,
-    SetLightStateRequest,
+    CreateSceneRequest, CreateUserRequest, DeleteSceneRequest, Group, GroupKind, Light,
+    LightStateUpdate, Scene, SetLightStateRequest,
 };
 use crate::storage;
 use crate::theme::{apply_theme_preference, ThemeMode, ThemePalette, ThemePreference};
-use crate::ui::{BridgePanel, LightGrid, NoticeTone, StatusBanner, ThemePanel, UiNotice};
+use crate::ui::{
+    BridgePanel, LightGrid, NoticeTone, SceneComposerRequest, StatusBanner, ThemePanel, UiNotice,
+};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use std::collections::{HashMap, HashSet};
@@ -471,6 +473,62 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    let toggle_all_lights = Callback::new({
+        move |()| {
+            let connection = match active_connection.get_untracked() {
+                Some(connection) => connection,
+                None => {
+                    set_notice.set(Some(UiNotice::warning(
+                        "No active bridge connection",
+                        "Connect to a bridge before changing all devices.",
+                    )));
+                    return;
+                }
+            };
+
+            let current_lights = lights.get_untracked();
+            if current_lights.is_empty() {
+                set_notice.set(Some(UiNotice::warning(
+                    "No devices found",
+                    "The current bridge snapshot does not contain any lights to control.",
+                )));
+                return;
+            }
+
+            let should_turn_on = current_lights
+                .iter()
+                .all(|light| !light.is_on.unwrap_or(false));
+            let requests = current_lights
+                .iter()
+                .map(|light| SetLightStateRequest {
+                    bridge_ip: connection.bridge_ip.clone(),
+                    username: connection.username.clone(),
+                    light_id: light.id.clone(),
+                    state: LightStateUpdate {
+                        on: Some(should_turn_on),
+                        brightness: None,
+                        saturation: None,
+                        hue: None,
+                        transition_time: Some(3),
+                    },
+                })
+                .collect::<Vec<_>>();
+
+            run_room_update(
+                "__all__".to_string(),
+                requests,
+                set_pending_room_control_ids,
+                set_lights,
+                set_notice,
+                if should_turn_on {
+                    "All devices turned on"
+                } else {
+                    "All devices turned off"
+                },
+            );
+        }
+    });
+
     let activate_scene = Callback::new({
         move |request: ActivateSceneRequest| {
             let scene_id = request.scene_id.clone();
@@ -521,6 +579,56 @@ pub fn App() -> impl IntoView {
                     }
                     Err(error) => {
                         set_notice.set(Some(UiNotice::error("Scene activation failed", error)));
+                    }
+                }
+
+                set_pending_scene_id.set(None);
+            });
+        }
+    });
+
+    let delete_scene = Callback::new({
+        move |request: DeleteSceneRequest| {
+            let scene_id = request.scene_id.clone();
+            let refresh_connection = BridgeConnection {
+                bridge_ip: request.bridge_ip.clone(),
+                username: request.username.clone(),
+            };
+            let deleted_scene_name = scenes
+                .get_untracked()
+                .into_iter()
+                .find(|scene| scene.id == scene_id)
+                .map(|scene| scene.name)
+                .unwrap_or_else(|| "Scene".to_string());
+
+            set_pending_scene_id.set(Some(scene_id.clone()));
+            spawn_local(async move {
+                match hue::delete_hue_scene(request).await {
+                    Ok(()) => {
+                        set_active_scene_by_group.update(|active_scenes| {
+                            active_scenes.retain(|_, active_scene_id| active_scene_id != &scene_id);
+                        });
+
+                        match fetch_bridge_snapshot(refresh_connection).await {
+                            Ok((fetched_lights, fetched_scenes, fetched_groups)) => {
+                                set_lights.set(fetched_lights);
+                                set_scenes.set(fetched_scenes);
+                                set_groups.set(fetched_groups);
+                                set_notice.set(Some(UiNotice::success(
+                                    "Scene deleted",
+                                    format!("{deleted_scene_name} was removed from the bridge."),
+                                )));
+                            }
+                            Err(error) => {
+                                set_notice.set(Some(UiNotice::warning(
+                                    "Scene deleted, refresh failed",
+                                    format!("{deleted_scene_name} was removed, but the app could not reload bridge state: {error}"),
+                                )));
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        set_notice.set(Some(UiNotice::error("Scene deletion failed", error)));
                     }
                 }
 
@@ -808,6 +916,130 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    let create_custom_room_scene = Callback::new({
+        move |request: SceneComposerRequest| {
+            let connection = match active_connection.get_untracked() {
+                Some(connection) => connection,
+                None => {
+                    set_notice.set(Some(UiNotice::warning(
+                        "No active bridge connection",
+                        "Connect to a bridge before creating room scenes.",
+                    )));
+                    return;
+                }
+            };
+
+            let room = match groups
+                .get_untracked()
+                .into_iter()
+                .find(|group| {
+                    group.id == request.room_id && matches!(group.kind, GroupKind::Room)
+                }) {
+                Some(room) => room,
+                None => {
+                    set_notice.set(Some(UiNotice::warning(
+                        "Room not available",
+                        "Custom scene creation currently works only for bridge rooms.",
+                    )));
+                    return;
+                }
+            };
+
+            let lights_by_id: HashMap<String, Light> = lights
+                .get_untracked()
+                .into_iter()
+                .map(|light| (light.id.clone(), light))
+                .collect();
+            let room_lights: Vec<Light> = room
+                .light_ids
+                .iter()
+                .filter_map(|light_id| lights_by_id.get(light_id).cloned())
+                .collect();
+
+            if room_lights.is_empty() {
+                set_notice.set(Some(UiNotice::warning(
+                    "No room devices found",
+                    "This room does not currently expose any lights to build scenes from.",
+                )));
+                return;
+            }
+
+            let scene_name = request.scene_name.trim().to_string();
+            if scene_name.is_empty() {
+                set_notice.set(Some(UiNotice::warning(
+                    "Scene name required",
+                    "Give the scene a name before saving it to the bridge.",
+                )));
+                return;
+            }
+
+            let original_states = snapshot_room_lights(&room_lights);
+            let room_name = room.name.clone();
+            let room_group_id = room.id.clone();
+            let room_light_ids: Vec<String> =
+                room_lights.iter().map(|light| light.id.clone()).collect();
+
+            set_pending_room_ids.update(|pending| {
+                pending.insert(room_group_id.clone());
+            });
+            set_notice.set(Some(UiNotice::info(
+                "Saving custom scene",
+                format!("Building {scene_name} for {room_name}."),
+            )));
+
+            spawn_local(async move {
+                let scene_state = scene_composer_state(&request);
+                let creation_result = create_single_room_scene(
+                    connection.clone(),
+                    room_group_id.clone(),
+                    &scene_name,
+                    &room_lights,
+                    &room_light_ids,
+                    scene_state,
+                )
+                .await;
+
+                let restore_result = restore_room_lights(connection.clone(), original_states).await;
+
+                match fetch_bridge_snapshot(connection.clone()).await {
+                    Ok((fetched_lights, fetched_scenes, fetched_groups)) => {
+                        set_lights.set(fetched_lights);
+                        set_scenes.set(fetched_scenes);
+                        set_groups.set(fetched_groups);
+                    }
+                    Err(error) => {
+                        set_notice.set(Some(UiNotice::warning(
+                            "Scene created, refresh failed",
+                            format!("{scene_name} was saved, but the app could not reload bridge state: {error}"),
+                        )));
+                    }
+                }
+
+                match (creation_result, restore_result) {
+                    (Ok(()), Ok(())) => {
+                        set_notice.set(Some(UiNotice::success(
+                            "Custom scene saved",
+                            format!("{scene_name} is now available in {room_name}."),
+                        )));
+                    }
+                    (Ok(()), Err(error)) => {
+                        set_notice.set(Some(UiNotice::warning(
+                            "Scene saved, restore failed",
+                            format!("{scene_name} was stored, but the room could not be restored: {error}"),
+                        )));
+                    }
+                    (Err(error), _) => {
+                        set_notice.set(Some(UiNotice::error("Scene creation failed", error)));
+                    }
+                }
+
+                set_pending_room_ids.update(|pending| {
+                    pending.remove(&room_group_id);
+                });
+            });
+        }
+    });
+
     let active_light_count = Signal::derive(move || {
         lights
             .get()
@@ -934,12 +1166,15 @@ pub fn App() -> impl IntoView {
                                 active_connection=active_connection
                                 is_refreshing=is_refreshing
                                 on_open_settings=Callback::new(move |_| set_page.set(AppPage::Settings))
+                                on_toggle_all_lights=toggle_all_lights
                                 on_toggle_room=toggle_room
                                 on_set_room_brightness=set_room_brightness
                                 on_toggle_light=toggle_light
                                 on_set_light_brightness=set_light_brightness
                                 on_activate_scene=activate_scene
+                                on_delete_scene=delete_scene
                                 on_create_curated_scenes=create_curated_room_scenes
+                                on_create_custom_scene=create_custom_room_scene
                                 on_reorder_rooms=reorder_rooms
                             />
                         </section>
@@ -1088,6 +1323,36 @@ async fn create_room_scene_pack(
     Ok(created_names)
 }
 
+async fn create_single_room_scene(
+    connection: BridgeConnection,
+    room_group_id: String,
+    scene_name: &str,
+    room_lights: &[Light],
+    room_light_ids: &[String],
+    state: LightStateUpdate,
+) -> Result<(), String> {
+    for light in room_lights {
+        let request = SetLightStateRequest {
+            bridge_ip: connection.bridge_ip.clone(),
+            username: connection.username.clone(),
+            light_id: light.id.clone(),
+            state: state.clone(),
+        };
+        hue::set_hue_light_state(request).await?;
+    }
+
+    let request = CreateSceneRequest {
+        bridge_ip: connection.bridge_ip,
+        username: connection.username,
+        group_id: room_group_id,
+        scene_name: scene_name.to_string(),
+        light_ids: room_light_ids.to_vec(),
+    };
+    hue::create_hue_scene(request).await?;
+
+    Ok(())
+}
+
 fn snapshot_room_lights(lights: &[Light]) -> Vec<SetLightStateRequest> {
     lights
         .iter()
@@ -1138,6 +1403,16 @@ fn collect_room_context(
     Some((room, room_lights))
 }
 
+fn scene_composer_state(request: &SceneComposerRequest) -> LightStateUpdate {
+    LightStateUpdate {
+        on: Some(true),
+        brightness: Some(request.brightness.max(1)),
+        saturation: Some(request.saturation.max(1)),
+        hue: Some(((f32::from(request.hue_degrees) / 360.0) * 65_535.0).round() as u16),
+        transition_time: Some(4),
+    }
+}
+
 fn apply_state_update(light: &mut Light, state: &LightStateUpdate) {
     if let Some(is_on) = state.on {
         light.is_on = Some(is_on);
@@ -1149,10 +1424,12 @@ fn apply_state_update(light: &mut Light, state: &LightStateUpdate) {
 
     if let Some(saturation) = state.saturation {
         light.saturation = Some(saturation);
+        light.xy = None;
     }
 
     if let Some(hue) = state.hue {
         light.hue = Some(hue);
+        light.xy = None;
     }
 }
 

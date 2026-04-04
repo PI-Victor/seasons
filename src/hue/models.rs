@@ -29,7 +29,7 @@ pub struct RegisteredApp {
     pub client_key: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Light {
     pub id: String,
@@ -38,6 +38,7 @@ pub struct Light {
     pub brightness: Option<u8>,
     pub saturation: Option<u8>,
     pub hue: Option<u16>,
+    pub xy: Option<[f32; 2]>,
     pub reachable: Option<bool>,
     pub light_type: Option<String>,
     pub model_id: Option<String>,
@@ -82,6 +83,14 @@ pub struct ActivateSceneRequest {
     pub username: String,
     pub scene_id: String,
     pub group_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteSceneRequest {
+    pub bridge_ip: String,
+    pub username: String,
+    pub scene_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

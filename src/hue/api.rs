@@ -1,6 +1,7 @@
 use crate::hue::models::{
     ActivateSceneRequest, BridgeConnection, CreateSceneRequest, CreateUserRequest,
-    DiscoveredBridge, Group, Light, RegisteredApp, Scene, SetLightStateRequest,
+    DeleteSceneRequest, DiscoveredBridge, Group, Light, RegisteredApp, Scene,
+    SetLightStateRequest,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -36,6 +37,10 @@ pub async fn activate_hue_scene(request: ActivateSceneRequest) -> Result<(), Str
 
 pub async fn create_hue_scene(request: CreateSceneRequest) -> Result<Scene, String> {
     invoke_with_named_args("create_hue_scene", &[("request", &request)]).await
+}
+
+pub async fn delete_hue_scene(request: DeleteSceneRequest) -> Result<(), String> {
+    invoke_with_named_args("delete_hue_scene", &[("request", &request)]).await
 }
 
 async fn invoke_without_args<T>(cmd: &str) -> Result<T, String>

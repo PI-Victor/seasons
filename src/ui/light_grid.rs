@@ -1,7 +1,11 @@
-use crate::hue::{ActivateSceneRequest, BridgeConnection, Group, GroupKind, Light, Scene};
+use crate::hue::{
+    ActivateSceneRequest, BridgeConnection, DeleteSceneRequest, Group, GroupKind, Light, Scene,
+};
 use leptos::prelude::*;
 use std::collections::{HashMap, HashSet};
 use wasm_bindgen::{JsCast, JsValue};
+
+use super::{SceneComposer, SceneComposerRequest};
 
 #[component]
 pub fn LightGrid(
@@ -17,16 +21,28 @@ pub fn LightGrid(
     active_connection: ReadSignal<Option<BridgeConnection>>,
     is_refreshing: ReadSignal<bool>,
     on_open_settings: Callback<()>,
+    on_toggle_all_lights: Callback<()>,
     on_toggle_room: Callback<String>,
     on_set_room_brightness: Callback<(String, u8)>,
     on_toggle_light: Callback<String>,
     on_set_light_brightness: Callback<(String, u8)>,
     on_activate_scene: Callback<ActivateSceneRequest>,
+    on_delete_scene: Callback<DeleteSceneRequest>,
     on_create_curated_scenes: Callback<String>,
+    on_create_custom_scene: Callback<SceneComposerRequest>,
     on_reorder_rooms: Callback<Vec<String>>,
 ) -> impl IntoView {
     let (dragged_room_id, set_dragged_room_id) = signal(None::<String>);
     let (drop_target_room_id, set_drop_target_room_id) = signal(None::<String>);
+    let home_light_count = Signal::derive(move || lights.get().len());
+    let home_active_count = Signal::derive(move || {
+        lights
+            .get()
+            .iter()
+            .filter(|light| light.is_on.unwrap_or(false))
+            .count()
+    });
+    let is_updating_home = Signal::derive(move || pending_room_control_ids.get().contains("__all__"));
 
     view! {
         <section class="light-panel">
@@ -35,13 +51,33 @@ pub fn LightGrid(
                     <p class="panel-kicker">"Rooms"</p>
                     <h2>"Main residence"</h2>
                 </div>
-                <div class="panel-badge">
-                    {move || {
-                        active_connection
-                            .get()
-                            .map(|connection| connection.bridge_ip)
-                            .unwrap_or_else(|| "Not connected".to_string())
-                    }}
+                <div class="light-panel-actions">
+                    <div class="panel-badge">
+                        {move || {
+                            active_connection
+                                .get()
+                                .map(|connection| connection.bridge_ip)
+                                .unwrap_or_else(|| "Not connected".to_string())
+                        }}
+                    </div>
+                    <button
+                        class=move || {
+                            if home_active_count.get() > 0 {
+                                "home-master-switch is-on"
+                            } else {
+                                "home-master-switch"
+                            }
+                        }
+                        disabled=move || is_refreshing.get() || is_updating_home.get() || home_light_count.get() == 0
+                        on:click=move |_| on_toggle_all_lights.run(())
+                    >
+                        <span class="home-master-switch-label">
+                            {move || if home_active_count.get() > 0 { "All on" } else { "All off" }}
+                        </span>
+                        <span class="home-master-switch-track">
+                            <span class="home-master-switch-thumb"></span>
+                        </span>
+                    </button>
                 </div>
             </div>
 
@@ -94,6 +130,7 @@ pub fn LightGrid(
                                     let room_scene_count = room.scenes.len();
                                     let room_light_count = room.lights.len();
                                     let room_active_count = room.active_light_count;
+                                    let room_is_on = room_active_count > 0;
                                     let room_average_brightness = room.average_brightness;
                                     let room_brightness_label = brightness_label(room_average_brightness);
                                     let room_slider_value = room_average_brightness.max(1);
@@ -118,10 +155,12 @@ pub fn LightGrid(
                                     let dragstart_room_id = room_id.clone();
                                     let dragstart_drop_room_id = room_id.clone();
                                     let craft_room_id = room_id.clone();
+                                    let custom_scene_room_id = room_id.clone();
                                     let toggle_room_id = room_id.clone();
                                     let set_room_brightness_id = room_id.clone();
                                     let is_creating_scenes = pending_room_ids.get().contains(&room_id);
                                     let is_updating_room = pending_room_control_ids.get().contains(&room_id);
+                                    let (show_composer, set_show_composer) = signal(false);
                                     let scene_strip = if room.scenes.is_empty() {
                                         view! {
                                             <div class="room-scene-empty">"No saved presets for this room"</div>
@@ -131,6 +170,7 @@ pub fn LightGrid(
                                             .scenes
                                             .into_iter()
                                             .map(|scene| {
+                                                let scene_name = scene.name.clone();
                                                 let is_pending = pending_scene_id.get().as_deref() == Some(scene.id.as_str());
                                                 let request = connection.clone().map(|connection| ActivateSceneRequest {
                                                     bridge_ip: connection.bridge_ip,
@@ -143,6 +183,11 @@ pub fn LightGrid(
                                                     .scene_type
                                                     .clone()
                                                     .unwrap_or_else(|| "Scene".to_string());
+                                                let delete_request = connection.clone().map(|connection| DeleteSceneRequest {
+                                                    bridge_ip: connection.bridge_ip,
+                                                    username: connection.username,
+                                                    scene_id: scene.id.clone(),
+                                                });
                                                 let is_active_scene = scene
                                                     .group_id
                                                     .as_deref()
@@ -161,24 +206,39 @@ pub fn LightGrid(
                                                 };
 
                                                 view! {
-                                                    <button
-                                                        class=scene_class
-                                                        style=preview_style
-                                                        disabled=is_pending
-                                                        on:click=move |_| {
-                                                            if let Some(request) = request.clone() {
-                                                                on_activate_scene.run(request);
+                                                    <div class=scene_class style=preview_style>
+                                                        <button
+                                                            class="scene-thumb-main"
+                                                            disabled=is_pending
+                                                            on:click=move |_| {
+                                                                if let Some(request) = request.clone() {
+                                                                    on_activate_scene.run(request);
+                                                                }
                                                             }
-                                                        }
-                                                    >
-                                                        <span class="scene-thumb-art-shell">
-                                                            <span class="scene-thumb-art"></span>
-                                                        </span>
-                                                        <span class="scene-thumb-copy">
-                                                            <strong>{scene.name}</strong>
-                                                            <small>{scene_type}</small>
-                                                        </span>
-                                                    </button>
+                                                        >
+                                                            <span class="scene-thumb-art-shell">
+                                                                <span class="scene-thumb-art"></span>
+                                                            </span>
+                                                            <span class="scene-thumb-copy">
+                                                                <strong>{scene_name.clone()}</strong>
+                                                                <small>{scene_type}</small>
+                                                            </span>
+                                                        </button>
+                                                        <button
+                                                            class="scene-thumb-delete"
+                                                            title="Delete scene"
+                                                            aria-label=format!("Delete {scene_name}")
+                                                            disabled=is_pending
+                                                            on:click=move |ev| {
+                                                                ev.stop_propagation();
+                                                                if let Some(request) = delete_request.clone() {
+                                                                    on_delete_scene.run(request);
+                                                                }
+                                                            }
+                                                        >
+                                                            "×"
+                                                        </button>
+                                                    </div>
                                                 }
                                             })
                                             .collect_view()
@@ -250,17 +310,7 @@ pub fn LightGrid(
                                                         >
                                                             "⋮⋮"
                                                         </button>
-                                                        <button
-                                                            class="room-summary-dot-button"
-                                                            disabled=is_updating_room
-                                                            on:click=move |ev| {
-                                                                ev.prevent_default();
-                                                                ev.stop_propagation();
-                                                                on_toggle_room.run(toggle_room_id.clone());
-                                                            }
-                                                        >
-                                                            <span class="room-summary-dot"></span>
-                                                        </button>
+                                                        <span class="room-summary-dot"></span>
                                                         <div class="room-summary-copy">
                                                             <h3>{room_name}</h3>
                                                             <p>
@@ -273,6 +323,25 @@ pub fn LightGrid(
                                                             <span>{format!("{room_active_count} on")}</span>
                                                             <span>{room_brightness_label.clone()}</span>
                                                         </div>
+                                                        <button
+                                                            class=move || {
+                                                                if room_is_on {
+                                                                    "room-summary-switch is-on"
+                                                                } else {
+                                                                    "room-summary-switch"
+                                                                }
+                                                            }
+                                                            disabled=is_updating_room
+                                                            on:click=move |ev| {
+                                                                ev.prevent_default();
+                                                                ev.stop_propagation();
+                                                                on_toggle_room.run(toggle_room_id.clone());
+                                                            }
+                                                        >
+                                                            <span class="room-summary-switch-track">
+                                                                <span class="room-summary-switch-thumb"></span>
+                                                            </span>
+                                                        </button>
                                                     </div>
                                                 </div>
                                                 <div
@@ -311,6 +380,13 @@ pub fn LightGrid(
                                                 <div class="room-strip-header">
                                                     <span class="room-strip-label">"Scenes"</span>
                                                     <div class="room-strip-actions">
+                                                        <button
+                                                            class="secondary-button room-action-button"
+                                                            disabled=is_creating_scenes
+                                                            on:click=move |_| set_show_composer.update(|show| *show = !*show)
+                                                        >
+                                                            {move || if show_composer.get() { "Hide composer" } else { "New scene" }}
+                                                        </button>
                                                         {if can_craft_scenes {
                                                             view! {
                                                                 <button
@@ -331,6 +407,22 @@ pub fn LightGrid(
                                                         }}
                                                     </div>
                                                 </div>
+                                                {move || {
+                                                    if show_composer.get() {
+                                                        view! {
+                                                            <SceneComposer
+                                                                room_id=custom_scene_room_id.clone()
+                                                                pending=is_creating_scenes
+                                                                on_submit=Callback::new(move |request: SceneComposerRequest| {
+                                                                    on_create_custom_scene.run(request);
+                                                                    set_show_composer.set(false);
+                                                                })
+                                                            />
+                                                        }.into_any()
+                                                    } else {
+                                                        ().into_any()
+                                                    }
+                                                }}
                                                 <div class="room-scene-strip">
                                                     {scene_strip}
                                                 </div>
@@ -434,7 +526,7 @@ pub fn LightGrid(
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq)]
 struct RoomSection {
     id: String,
     can_craft_scenes: bool,
@@ -691,6 +783,12 @@ fn light_accent_rgb(light: &Light) -> Option<(u8, u8, u8)> {
         return None;
     }
 
+    if let Some([x, y]) = light.xy {
+        if let Some(rgb) = xy_to_ui_rgb(x, y, brightness) {
+            return Some(rgb);
+        }
+    }
+
     let hue = light.hue.unwrap_or(8_000);
     let saturation = light.saturation.unwrap_or(40);
     Some(hsv_to_ui_rgb(hue, saturation, brightness))
@@ -719,6 +817,52 @@ fn hsv_to_ui_rgb(hue: u16, saturation: u8, brightness: u8) -> (u8, u8, u8) {
     let value = (0.86 + brightness_ratio * 0.12).clamp(0.86, 0.98);
 
     hsv_to_rgb_float(hue, saturation, value)
+}
+
+fn xy_to_ui_rgb(x: f32, y: f32, brightness: u8) -> Option<(u8, u8, u8)> {
+    if !(0.0..=1.0).contains(&x) || !(0.0..=1.0).contains(&y) || y <= f32::EPSILON {
+        return None;
+    }
+
+    let z = 1.0 - x - y;
+    if z < 0.0 {
+        return None;
+    }
+
+    let luminance = 0.82 + (f32::from(brightness) / 254.0) * 0.16;
+    let x_xyz = (luminance / y) * x;
+    let z_xyz = (luminance / y) * z;
+
+    let mut red = x_xyz * 1.656492 - luminance * 0.354851 - z_xyz * 0.255038;
+    let mut green = -x_xyz * 0.707196 + luminance * 1.655397 + z_xyz * 0.036152;
+    let mut blue = x_xyz * 0.051713 - luminance * 0.121364 + z_xyz * 1.01153;
+
+    red = red.max(0.0);
+    green = green.max(0.0);
+    blue = blue.max(0.0);
+
+    let max_channel = red.max(green).max(blue);
+    if max_channel > 1.0 {
+        red /= max_channel;
+        green /= max_channel;
+        blue /= max_channel;
+    }
+
+    Some((
+        gamma_correct(red),
+        gamma_correct(green),
+        gamma_correct(blue),
+    ))
+}
+
+fn gamma_correct(value: f32) -> u8 {
+    let corrected = if value <= 0.0031308 {
+        12.92 * value
+    } else {
+        1.055 * value.powf(1.0 / 2.4) - 0.055
+    };
+
+    (corrected.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 fn hsv_to_rgb_float(hue: f32, saturation: f32, value: f32) -> (u8, u8, u8) {

@@ -20,6 +20,8 @@ pub fn BridgePanel(
     on_register: Callback<()>,
     on_forget: Callback<()>,
 ) -> impl IntoView {
+    let (show_username, set_show_username) = signal(false);
+
     view! {
         <section class="bridge-panel surface-panel">
             <div class="panel-header">
@@ -28,7 +30,7 @@ pub fn BridgePanel(
                     <h2>"Bridge management"</h2>
                 </div>
                 <div class="bridge-header-actions">
-                    <button class="secondary-button compact-button" on:click=move |_| on_forget.run(())>
+                    <button class="secondary-button destructive-button compact-button" on:click=move |_| on_forget.run(())>
                         "Forget saved bridge"
                     </button>
                     <button
@@ -92,12 +94,44 @@ pub fn BridgePanel(
 
                 <label class="field">
                     <span class="field-label">"Existing username"</span>
-                    <input
-                        type="text"
-                        placeholder="Paste an existing Hue app username"
-                        prop:value=username
-                        on:input=move |ev| on_username_input.run(event_target_value(&ev))
-                    />
+                    <div class="field-input-shell">
+                        <input
+                            type=move || if show_username.get() { "text" } else { "password" }
+                            placeholder="Paste an existing Hue app username"
+                            prop:value=username
+                            on:input=move |ev| on_username_input.run(event_target_value(&ev))
+                        />
+                        <button
+                            type="button"
+                            class="field-visibility-toggle"
+                            aria-label=move || {
+                                if show_username.get() {
+                                    "Hide saved username"
+                                } else {
+                                    "Show saved username"
+                                }
+                            }
+                            title=move || {
+                                if show_username.get() {
+                                    "Hide username"
+                                } else {
+                                    "Show username"
+                                }
+                            }
+                            on:click=move |_| set_show_username.update(|value| *value = !*value)
+                        >
+                            <span
+                                class=move || {
+                                    if show_username.get() {
+                                        "fa-solid fa-eye-slash"
+                                    } else {
+                                        "fa-solid fa-eye"
+                                    }
+                                }
+                                aria-hidden="true"
+                            ></span>
+                        </button>
+                    </div>
                 </label>
             </div>
 
