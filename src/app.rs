@@ -12,6 +12,7 @@ use crate::ui::{
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use std::collections::{HashMap, HashSet};
+use wasm_bindgen::{closure::Closure, JsCast};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AppPage {
@@ -43,6 +44,8 @@ pub fn App() -> impl IntoView {
     let (pending_scene_id, set_pending_scene_id) = signal(None::<String>);
     let (pending_room_ids, set_pending_room_ids) = signal(HashSet::<String>::new());
     let (pending_room_control_ids, set_pending_room_control_ids) = signal(HashSet::<String>::new());
+    let (pending_room_brightness_timeouts, set_pending_room_brightness_timeouts) =
+        signal(HashMap::<String, i32>::new());
     let (pending_light_ids, set_pending_light_ids) = signal(HashSet::<String>::new());
     let (active_scene_by_group, set_active_scene_by_group) =
         signal(HashMap::<String, String>::new());
@@ -446,6 +449,35 @@ pub fn App() -> impl IntoView {
             }
 
             let brightness = brightness.max(1);
+            let optimistic_state = LightStateUpdate {
+                on: Some(true),
+                brightness: Some(brightness),
+                saturation: None,
+                hue: None,
+                transition_time: Some(4),
+            };
+            let room_light_ids = room_lights
+                .iter()
+                .map(|light| light.id.clone())
+                .collect::<HashSet<_>>();
+            set_lights.update(|lights| {
+                for light in lights {
+                    if room_light_ids.contains(&light.id) {
+                        apply_state_update(light, &optimistic_state);
+                    }
+                }
+            });
+
+            if let Some(previous_timeout) = pending_room_brightness_timeouts
+                .get_untracked()
+                .get(&room_id)
+                .copied()
+            {
+                if let Some(window) = leptos::web_sys::window() {
+                    window.clear_timeout_with_handle(previous_timeout);
+                }
+            }
+
             let requests = room_lights
                 .iter()
                 .map(|light| SetLightStateRequest {
@@ -461,15 +493,56 @@ pub fn App() -> impl IntoView {
                     },
                 })
                 .collect::<Vec<_>>();
+            let scheduled_requests = requests.clone();
 
-            run_room_update(
-                room_id,
-                requests,
-                set_pending_room_control_ids,
-                set_lights,
-                set_notice,
-                "Room brightness updated",
-            );
+            let timeout_room_id = room_id.clone();
+            let scheduled_room_id = room_id.clone();
+            let callback = Closure::once(move || {
+                set_pending_room_brightness_timeouts.update(|timeouts| {
+                    timeouts.remove(&timeout_room_id);
+                });
+                run_room_update(
+                    scheduled_room_id,
+                    scheduled_requests,
+                    set_pending_room_control_ids,
+                    set_lights,
+                    set_notice,
+                    "Room brightness updated",
+                );
+            });
+
+            if let Some(window) = leptos::web_sys::window() {
+                match window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                    callback.as_ref().unchecked_ref(),
+                    140,
+                ) {
+                    Ok(timeout_id) => {
+                        set_pending_room_brightness_timeouts.update(|timeouts| {
+                            timeouts.insert(room_id, timeout_id);
+                        });
+                        callback.forget();
+                    }
+                    Err(_) => {
+                        run_room_update(
+                            room_id,
+                            requests,
+                            set_pending_room_control_ids,
+                            set_lights,
+                            set_notice,
+                            "Room brightness updated",
+                        );
+                    }
+                }
+            } else {
+                run_room_update(
+                    room_id,
+                    requests,
+                    set_pending_room_control_ids,
+                    set_lights,
+                    set_notice,
+                    "Room brightness updated",
+                );
+            }
         }
     });
 
