@@ -829,6 +829,9 @@ input {
   font-size: 0.78rem;
   letter-spacing: -0.16em;
   cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: element;
 }
 
 .room-drag-handle:active {

@@ -1,11 +1,9 @@
+use super::{DeviceGrid, SceneComposer, SceneComposerRequest};
 use crate::hue::{
     ActivateSceneRequest, BridgeConnection, DeleteSceneRequest, Group, GroupKind, Light, Scene,
 };
 use leptos::prelude::*;
 use std::collections::{HashMap, HashSet};
-use wasm_bindgen::{JsCast, JsValue};
-
-use super::{DeviceGrid, SceneComposer, SceneComposerRequest};
 
 #[component]
 pub fn LightGrid(
@@ -46,7 +44,17 @@ pub fn LightGrid(
         Signal::derive(move || pending_room_control_ids.get().contains("__all__"));
 
     view! {
-        <section class="light-panel">
+        <section
+            class="light-panel"
+            on:pointerup=move |_| {
+                set_dragged_room_id.set(None);
+                set_drop_target_room_id.set(None);
+            }
+            on:pointercancel=move |_| {
+                set_dragged_room_id.set(None);
+                set_drop_target_room_id.set(None);
+            }
+        >
             <div class="panel-header compact-panel-header light-panel-header">
                 <div>
                     <p class="panel-kicker">"Rooms"</p>
@@ -142,7 +150,8 @@ pub fn LightGrid(
                                         room_card_class.to_string()
                                     };
                                     let room_order_snapshot = ordered_room_ids.clone();
-                                    let dragover_room_id = room_id.clone();
+                                    let pointerenter_room_id = room_id.clone();
+                                    let pointermove_room_id = room_id.clone();
                                     let dragleave_room_id = room_id.clone();
                                     let drop_room_id = room_id.clone();
                                     let dragstart_room_id = room_id.clone();
@@ -242,28 +251,32 @@ pub fn LightGrid(
                                         <details class=room_drag_class style=room_style>
                                             <summary
                                                 class="room-card-summary"
-                                                on:dragover=move |ev| {
-                                                    ev.prevent_default();
-                                                    set_drop_effect(&ev, "move");
-                                                    set_drop_target_room_id.set(Some(dragover_room_id.clone()));
+                                                on:pointerenter=move |_| {
+                                                    if dragged_room_id.get().is_some() {
+                                                        set_drop_target_room_id
+                                                            .set(Some(pointerenter_room_id.clone()));
+                                                    }
                                                 }
-                                                on:dragleave=move |_| {
+                                                on:pointermove=move |_| {
+                                                    if dragged_room_id.get().is_some() {
+                                                        set_drop_target_room_id
+                                                            .set(Some(pointermove_room_id.clone()));
+                                                    }
+                                                }
+                                                on:pointerleave=move |_| {
                                                     if drop_target_room_id.get().as_deref()
                                                         == Some(dragleave_room_id.as_str())
                                                     {
                                                         set_drop_target_room_id.set(None);
                                                     }
                                                 }
-                                                on:drop=move |ev| {
-                                                    ev.prevent_default();
-                                                    let source_room_id = read_drag_data(&ev)
-                                                        .filter(|room_id| !room_id.is_empty())
-                                                        .or_else(|| dragged_room_id.get());
-
-                                                    let Some(source_room_id) = source_room_id else {
+                                                on:pointerup=move |ev| {
+                                                    let Some(source_room_id) = dragged_room_id.get() else {
                                                         return;
                                                     };
 
+                                                    ev.prevent_default();
+                                                    ev.stop_propagation();
                                                     set_drop_target_room_id.set(None);
                                                     set_dragged_room_id.set(None);
 
@@ -284,25 +297,28 @@ pub fn LightGrid(
                                             >
                                                 <div class="room-card-header">
                                                     <div class="room-summary-main">
-                                                        <button
+                                                        <span
                                                             class="room-drag-handle"
-                                                            draggable="true"
-                                                            on:dragstart=move |ev| {
+                                                            title="Drag to reorder rooms"
+                                                            on:pointerdown=move |ev| {
+                                                                ev.prevent_default();
                                                                 ev.stop_propagation();
-                                                                write_drag_data(&ev, &dragstart_room_id);
-                                                                set_effect_allowed(&ev, "move");
                                                                 set_dragged_room_id
                                                                     .set(Some(dragstart_room_id.clone()));
                                                                 set_drop_target_room_id
                                                                     .set(Some(dragstart_drop_room_id.clone()));
                                                             }
-                                                            on:dragend=move |_| {
-                                                                set_dragged_room_id.set(None);
-                                                                set_drop_target_room_id.set(None);
+                                                            on:pointerup=move |ev| {
+                                                                ev.prevent_default();
+                                                                ev.stop_propagation();
+                                                            }
+                                                            on:click=move |ev| {
+                                                                ev.prevent_default();
+                                                                ev.stop_propagation();
                                                             }
                                                         >
                                                             "⋮⋮"
-                                                        </button>
+                                                        </span>
                                                         <span class="room-summary-dot"></span>
                                                         <div class="room-summary-copy">
                                                             <h3>{room_name}</h3>
@@ -566,11 +582,7 @@ fn reorder_room_ids(current_order: &[String], source_id: &str, target_id: &str) 
     };
 
     let source_room_id = reordered.remove(source_index);
-    let insert_index = if source_index < target_index {
-        target_index.saturating_sub(1)
-    } else {
-        target_index
-    };
+    let insert_index = target_index.min(reordered.len());
     reordered.insert(insert_index, source_room_id);
     reordered
 }
@@ -847,91 +859,12 @@ fn hashed_scene_variation(name: &str) -> SceneTone {
     }
 }
 
-fn write_drag_data<E>(event: &E, room_id: &str)
-where
-    E: AsRef<JsValue>,
-{
-    let Some(data_transfer) = get_data_transfer(event) else {
-        return;
-    };
-
-    let Ok(set_data) = js_sys::Reflect::get(&data_transfer, &JsValue::from_str("setData"))
-        .and_then(|value| value.dyn_into::<js_sys::Function>())
-    else {
-        return;
-    };
-
-    let _ = set_data.call2(
-        &data_transfer,
-        &JsValue::from_str("text/plain"),
-        &JsValue::from_str(room_id),
-    );
-}
-
-fn read_drag_data<E>(event: &E) -> Option<String>
-where
-    E: AsRef<JsValue>,
-{
-    let data_transfer = get_data_transfer(event)?;
-    let get_data = js_sys::Reflect::get(&data_transfer, &JsValue::from_str("getData"))
-        .ok()?
-        .dyn_into::<js_sys::Function>()
-        .ok()?;
-
-    get_data
-        .call1(&data_transfer, &JsValue::from_str("text/plain"))
-        .ok()?
-        .as_string()
-}
-
-fn set_effect_allowed<E>(event: &E, value: &str)
-where
-    E: AsRef<JsValue>,
-{
-    let Some(data_transfer) = get_data_transfer(event) else {
-        return;
-    };
-
-    let _ = js_sys::Reflect::set(
-        &data_transfer,
-        &JsValue::from_str("effectAllowed"),
-        &JsValue::from_str(value),
-    );
-}
-
-fn set_drop_effect<E>(event: &E, value: &str)
-where
-    E: AsRef<JsValue>,
-{
-    let Some(data_transfer) = get_data_transfer(event) else {
-        return;
-    };
-
-    let _ = js_sys::Reflect::set(
-        &data_transfer,
-        &JsValue::from_str("dropEffect"),
-        &JsValue::from_str(value),
-    );
-}
-
-fn get_data_transfer<E>(event: &E) -> Option<JsValue>
-where
-    E: AsRef<JsValue>,
-{
-    let value = js_sys::Reflect::get(event.as_ref(), &JsValue::from_str("dataTransfer")).ok()?;
-    if value.is_null() || value.is_undefined() {
-        None
-    } else {
-        Some(value)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{apply_room_order, reorder_room_ids, RoomSection};
 
     #[test]
-    fn reorder_room_ids_moves_source_before_target() {
+    fn reorder_room_ids_moves_source_into_target_position_when_moving_up() {
         let current = vec![
             "desk".to_string(),
             "hallway".to_string(),
@@ -940,6 +873,18 @@ mod tests {
 
         let reordered = reorder_room_ids(&current, "kitchen", "desk");
         assert_eq!(reordered, vec!["kitchen", "desk", "hallway"]);
+    }
+
+    #[test]
+    fn reorder_room_ids_moves_source_into_target_position_when_moving_down() {
+        let current = vec![
+            "desk".to_string(),
+            "hallway".to_string(),
+            "kitchen".to_string(),
+        ];
+
+        let reordered = reorder_room_ids(&current, "desk", "hallway");
+        assert_eq!(reordered, vec!["hallway", "desk", "kitchen"]);
     }
 
     #[test]
