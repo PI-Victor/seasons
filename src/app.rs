@@ -1,13 +1,15 @@
 use crate::desktop;
 use crate::hue::{
-    self, curated_room_scenes, preset_light_state, ActivateSceneRequest, BridgeConnection,
-    CreateSceneRequest, CreateUserRequest, DeleteSceneRequest, Group, GroupKind, Light,
-    LightStateUpdate, Scene, SetLightStateRequest,
+    self, curated_room_scenes, preset_light_state, ActivateSceneRequest, AudioSyncColorPalette,
+    AudioSyncSpeedMode, AudioSyncStartRequest, AudioSyncUpdateRequest, BridgeConnection, CreateSceneRequest,
+    CreateUserRequest, DeleteSceneRequest, EntertainmentArea, Group, GroupKind, Light,
+    LightStateUpdate, PipeWireOutputTarget, Scene, SetLightStateRequest,
 };
-use crate::storage;
+use crate::storage::{self, AudioSyncPreferences};
 use crate::theme::{apply_theme_preference, ThemeMode, ThemePalette, ThemePreference};
 use crate::ui::{
-    BridgePanel, LightGrid, NoticeTone, SceneComposerRequest, StatusBanner, ThemePanel, UiNotice,
+    AudioSyncPanel, BridgePanel, LightGrid, NoticeTone, SceneComposerRequest, StatusBanner,
+    ThemePanel, UiNotice,
 };
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -18,6 +20,16 @@ use wasm_bindgen::{closure::Closure, JsCast};
 enum AppPage {
     Home,
     Settings,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AudioSyncSelection {
+    area_id: String,
+    pipewire_target_object: String,
+    speed_mode: AudioSyncSpeedMode,
+    color_palette: AudioSyncColorPalette,
+    base_color_hex: Option<String>,
+    brightness_ceiling: Option<u8>,
 }
 
 #[component]
@@ -31,6 +43,16 @@ pub fn App() -> impl IntoView {
     let (groups, set_groups) = signal(Vec::<Group>::new());
     let (lights, set_lights) = signal(Vec::<Light>::new());
     let (active_connection, set_active_connection) = signal(None::<BridgeConnection>);
+    let (entertainment_areas, set_entertainment_areas) = signal(Vec::<EntertainmentArea>::new());
+    let (selected_entertainment_area_id, set_selected_entertainment_area_id) =
+        signal(String::new());
+    let (pipewire_targets, set_pipewire_targets) = signal(Vec::<PipeWireOutputTarget>::new());
+    let (selected_pipewire_target_object, set_selected_pipewire_target_object) =
+        signal(String::new());
+    let (selected_sync_speed_mode, set_selected_sync_speed_mode) =
+        signal(AudioSyncSpeedMode::default());
+    let (selected_sync_color_palette, set_selected_sync_color_palette) =
+        signal(AudioSyncColorPalette::default());
     let (notice, set_notice) = signal(Some(UiNotice::info(
         "Local-first Hue control",
         "Bridge setup is stored locally after a successful connection. Use settings only when you need to change it.",
@@ -39,8 +61,25 @@ pub fn App() -> impl IntoView {
     let (is_registering, set_is_registering) = signal(false);
     let (is_connecting, set_is_connecting) = signal(false);
     let (is_refreshing, set_is_refreshing) = signal(false);
+    let (is_loading_entertainment_areas, set_is_loading_entertainment_areas) = signal(false);
+    let (is_loading_pipewire_targets, set_is_loading_pipewire_targets) = signal(false);
+    let (is_audio_syncing, set_is_audio_syncing) = signal(false);
+    let (is_audio_sync_starting, set_is_audio_sync_starting) = signal(false);
     let (did_restore_session, set_did_restore_session) = signal(false);
     let (did_restore_theme, set_did_restore_theme) = signal(false);
+    let (did_restore_audio_sync_preferences, set_did_restore_audio_sync_preferences) =
+        signal(false);
+    let (did_load_pipewire_targets, set_did_load_pipewire_targets) = signal(false);
+    let (last_applied_audio_sync_selection, set_last_applied_audio_sync_selection) = signal(
+        AudioSyncSelection {
+            area_id: String::new(),
+            pipewire_target_object: String::new(),
+            speed_mode: AudioSyncSpeedMode::default(),
+            color_palette: AudioSyncColorPalette::default(),
+            base_color_hex: None,
+            brightness_ceiling: None,
+        },
+    );
     let (pending_scene_id, set_pending_scene_id) = signal(None::<String>);
     let (pending_room_ids, set_pending_room_ids) = signal(HashSet::<String>::new());
     let (pending_room_control_ids, set_pending_room_control_ids) = signal(HashSet::<String>::new());
@@ -49,8 +88,128 @@ pub fn App() -> impl IntoView {
     let (pending_light_ids, set_pending_light_ids) = signal(HashSet::<String>::new());
     let (active_scene_by_group, set_active_scene_by_group) =
         signal(HashMap::<String, String>::new());
+    let (last_activated_scene_id, set_last_activated_scene_id) = signal(None::<String>);
     let (room_order, set_room_order) = signal(Vec::<String>::new());
     let (theme_preference, set_theme_preference) = signal(ThemePreference::default());
+
+    let refresh_entertainment_areas = Callback::new({
+        move |connection: BridgeConnection| {
+            set_is_loading_entertainment_areas.set(true);
+            spawn_local(async move {
+                match hue::list_hue_entertainment_areas(connection).await {
+                    Ok(areas) => {
+                        let current_selection = selected_entertainment_area_id
+                            .get_untracked()
+                            .trim()
+                            .to_string();
+                        let has_current = areas.iter().any(|area| area.id == current_selection);
+                        let next_selection = if has_current {
+                            current_selection
+                        } else {
+                            areas
+                                .first()
+                                .map(|area| area.id.clone())
+                                .unwrap_or_default()
+                        };
+
+                        set_entertainment_areas.set(areas);
+                        set_selected_entertainment_area_id.set(next_selection.clone());
+                        let preferences = AudioSyncPreferences {
+                            selected_entertainment_area_id: if next_selection.is_empty() {
+                                None
+                            } else {
+                                Some(next_selection)
+                            },
+                            selected_pipewire_target_object: if selected_pipewire_target_object
+                                .get_untracked()
+                                .trim()
+                                .is_empty()
+                            {
+                                None
+                            } else {
+                                Some(selected_pipewire_target_object.get_untracked())
+                            },
+                            selected_sync_speed_mode: selected_sync_speed_mode.get_untracked(),
+                            selected_sync_color_palette: selected_sync_color_palette
+                                .get_untracked(),
+                        };
+                        let _ = storage::save_audio_sync_preferences(&preferences).await;
+                    }
+                    Err(error) => {
+                        set_entertainment_areas.set(Vec::new());
+                        set_selected_entertainment_area_id.set(String::new());
+                        set_notice.set(Some(UiNotice::warning(
+                            "Could not load entertainment areas",
+                            error,
+                        )));
+                    }
+                }
+
+                set_is_loading_entertainment_areas.set(false);
+            });
+        }
+    });
+
+    let refresh_pipewire_targets = Callback::new({
+        move |()| {
+            set_is_loading_pipewire_targets.set(true);
+            spawn_local(async move {
+                match hue::list_pipewire_output_targets().await {
+                    Ok(targets) => {
+                        let current_selection = selected_pipewire_target_object
+                            .get_untracked()
+                            .trim()
+                            .to_string();
+                        let has_current = targets
+                            .iter()
+                            .any(|target| target.target_object == current_selection);
+                        let next_selection = if has_current {
+                            current_selection
+                        } else {
+                            targets
+                                .first()
+                                .map(|target| target.target_object.clone())
+                                .unwrap_or_default()
+                        };
+
+                        set_pipewire_targets.set(targets);
+                        set_selected_pipewire_target_object.set(next_selection.clone());
+
+                        let preferences = AudioSyncPreferences {
+                            selected_entertainment_area_id: if selected_entertainment_area_id
+                                .get_untracked()
+                                .trim()
+                                .is_empty()
+                            {
+                                None
+                            } else {
+                                Some(selected_entertainment_area_id.get_untracked())
+                            },
+                            selected_pipewire_target_object: if next_selection.is_empty() {
+                                None
+                            } else {
+                                Some(next_selection)
+                            },
+                            selected_sync_speed_mode: selected_sync_speed_mode.get_untracked(),
+                            selected_sync_color_palette: selected_sync_color_palette
+                                .get_untracked(),
+                        };
+                        let _ = storage::save_audio_sync_preferences(&preferences).await;
+                    }
+                    Err(error) => {
+                        set_pipewire_targets.set(Vec::new());
+                        set_selected_pipewire_target_object.set(String::new());
+                        set_notice.set(Some(UiNotice::warning(
+                            "Could not load PipeWire outputs",
+                            error,
+                        )));
+                    }
+                }
+
+                set_is_loading_pipewire_targets.set(false);
+            });
+        }
+    });
 
     let refresh_bridge_state = Callback::new({
         move |connection: BridgeConnection| {
@@ -69,8 +228,10 @@ pub fn App() -> impl IntoView {
                             set_scenes.set(fetched_scenes);
                             set_groups.set(fetched_groups);
                             set_active_scene_by_group.set(HashMap::new());
+                            set_last_activated_scene_id.set(None);
                             set_room_order.set(saved_room_order);
                             set_active_connection.set(Some(connection.clone()));
+                            refresh_entertainment_areas.run(connection.clone());
                             if let Err(error) = storage::save_bridge_connection(&connection).await {
                                 set_notice.set(Some(UiNotice::warning(
                                     "Session active, but not persisted",
@@ -91,7 +252,10 @@ pub fn App() -> impl IntoView {
                             set_scenes.set(Vec::new());
                             set_groups.set(Vec::new());
                             set_active_scene_by_group.set(HashMap::new());
+                            set_last_activated_scene_id.set(None);
                             set_room_order.set(Vec::new());
+                            set_entertainment_areas.set(Vec::new());
+                            set_selected_entertainment_area_id.set(String::new());
                             set_notice
                                 .set(Some(UiNotice::error("Could not load bridge data", error)));
                         }
@@ -152,6 +316,147 @@ pub fn App() -> impl IntoView {
     });
 
     Effect::new(move |_| {
+        if did_restore_audio_sync_preferences.get() {
+            return;
+        }
+
+        set_did_restore_audio_sync_preferences.set(true);
+        spawn_local(async move {
+            match storage::load_audio_sync_preferences().await {
+                Ok(preferences) => {
+                    if let Some(area_id) = preferences.selected_entertainment_area_id {
+                        set_selected_entertainment_area_id.set(area_id);
+                    }
+                    if let Some(target_object) = preferences.selected_pipewire_target_object {
+                        set_selected_pipewire_target_object.set(target_object);
+                    }
+                    set_selected_sync_speed_mode.set(preferences.selected_sync_speed_mode);
+                    set_selected_sync_color_palette.set(preferences.selected_sync_color_palette);
+                }
+                Err(error) => {
+                    set_notice.set(Some(UiNotice::warning(
+                        "Could not restore audio sync preferences",
+                        error,
+                    )));
+                }
+            }
+        });
+    });
+
+    Effect::new(move |_| {
+        if did_load_pipewire_targets.get() {
+            return;
+        }
+
+        set_did_load_pipewire_targets.set(true);
+        refresh_pipewire_targets.run(());
+    });
+
+    Effect::new(move |_| {
+        let area_id = selected_entertainment_area_id.get();
+        let color_palette = selected_sync_color_palette.get();
+        let (base_color_hex, brightness_ceiling) =
+            if area_id.trim().is_empty() || !matches!(color_palette, AudioSyncColorPalette::CurrentRoom)
+            {
+                (None, None)
+            } else {
+                derive_audio_sync_visual_profile(
+                    &entertainment_areas.get(),
+                    &groups.get(),
+                    &lights.get(),
+                    &scenes.get(),
+                    &active_scene_by_group.get(),
+                    last_activated_scene_id.get().as_deref(),
+                    &area_id,
+                )
+            };
+
+        let selection = AudioSyncSelection {
+            area_id,
+            pipewire_target_object: selected_pipewire_target_object.get(),
+            speed_mode: selected_sync_speed_mode.get(),
+            color_palette,
+            base_color_hex,
+            brightness_ceiling,
+        };
+
+        if !is_audio_syncing.get() {
+            set_last_applied_audio_sync_selection.set(selection);
+            return;
+        }
+
+        let previous = last_applied_audio_sync_selection.get();
+        if previous == selection {
+            return;
+        }
+
+        let Some(connection) = active_connection.get() else {
+            return;
+        };
+
+        let areas = entertainment_areas.get();
+        let current_groups = groups.get();
+        let current_lights = lights.get();
+        set_last_applied_audio_sync_selection.set(selection.clone());
+
+        spawn_local(async move {
+            let can_update_in_place = previous.area_id == selection.area_id
+                && previous.pipewire_target_object == selection.pipewire_target_object;
+
+            if can_update_in_place {
+                match request_audio_sync_update(
+                    selection.speed_mode,
+                    selection.color_palette,
+                    &areas,
+                    &current_groups,
+                    &current_lights,
+                    &scenes.get(),
+                    &active_scene_by_group.get(),
+                    last_activated_scene_id.get().as_deref(),
+                    &selection.area_id,
+                )
+                .await
+                {
+                    Ok(()) => {}
+                    Err(error) => {
+                        set_is_audio_syncing.set(false);
+                        set_notice.set(Some(UiNotice::error("Audio sync failed", error)));
+                    }
+                }
+            } else {
+                match request_audio_sync_start(
+                    connection.clone(),
+                    selection.area_id.clone(),
+                    selection.pipewire_target_object.clone(),
+                    selection.speed_mode,
+                    selection.color_palette,
+                    &areas,
+                    &current_groups,
+                    &current_lights,
+                    &scenes.get(),
+                    &active_scene_by_group.get(),
+                    last_activated_scene_id.get().as_deref(),
+                )
+                .await
+                {
+                    Ok(result) => {
+                        set_active_connection.set(Some(result.connection.clone()));
+                        let _ = storage::save_bridge_connection(&result.connection).await;
+                        set_notice.set(Some(UiNotice::success(
+                            "Audio sync updated",
+                            "Hue Entertainment streaming was refreshed with the new sync settings.",
+                        )));
+                    }
+                    Err(error) => {
+                        set_is_audio_syncing.set(false);
+                        set_notice.set(Some(UiNotice::error("Audio sync failed", error)));
+                    }
+                }
+            }
+        });
+    });
+
+    Effect::new(move |_| {
         let preference = theme_preference.get();
         let _ = apply_theme_preference(&preference);
     });
@@ -200,6 +505,9 @@ pub fn App() -> impl IntoView {
         move |()| {
             let bridge_ip = selected_bridge_ip.get_untracked().trim().to_string();
             let username_value = username.get_untracked().trim().to_string();
+            let remembered_connection = active_connection.get_untracked().filter(|connection| {
+                connection.bridge_ip == bridge_ip && connection.username == username_value
+            });
 
             if bridge_ip.is_empty() {
                 set_notice.set(Some(UiNotice::warning(
@@ -222,6 +530,12 @@ pub fn App() -> impl IntoView {
                 let connection = BridgeConnection {
                     bridge_ip,
                     username: username_value,
+                    client_key: remembered_connection
+                        .as_ref()
+                        .and_then(|connection| connection.client_key.clone()),
+                    application_id: remembered_connection
+                        .as_ref()
+                        .and_then(|connection| connection.application_id.clone()),
                 };
 
                 set_notice.set(Some(UiNotice::info(
@@ -273,6 +587,8 @@ pub fn App() -> impl IntoView {
                         let connection = BridgeConnection {
                             bridge_ip,
                             username: registered.username.clone(),
+                            client_key: registered.client_key.clone(),
+                            application_id: None,
                         };
 
                         set_username.set(registered.username);
@@ -297,6 +613,10 @@ pub fn App() -> impl IntoView {
         move |()| {
             let active_connection = active_connection.get_untracked();
             spawn_local(async move {
+                let _ = hue::stop_hue_audio_sync().await;
+                set_is_audio_syncing.set(false);
+                set_entertainment_areas.set(Vec::new());
+                set_selected_entertainment_area_id.set(String::new());
                 if let Some(connection) = active_connection {
                     let _ = storage::clear_room_order(&connection).await;
                 }
@@ -349,6 +669,268 @@ pub fn App() -> impl IntoView {
             let mut preference = theme_preference.get_untracked();
             preference.palette = palette;
             save_theme_preference.run(preference);
+        }
+    });
+
+    let select_entertainment_area = Callback::new({
+        move |area_id: String| {
+            let trimmed = area_id.trim().to_string();
+            set_selected_entertainment_area_id.set(trimmed.clone());
+            spawn_local(async move {
+                let preferences = AudioSyncPreferences {
+                    selected_entertainment_area_id: if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed)
+                    },
+                    selected_pipewire_target_object: if selected_pipewire_target_object
+                        .get_untracked()
+                        .trim()
+                        .is_empty()
+                    {
+                        None
+                    } else {
+                        Some(selected_pipewire_target_object.get_untracked())
+                    },
+                    selected_sync_speed_mode: selected_sync_speed_mode.get_untracked(),
+                    selected_sync_color_palette: selected_sync_color_palette.get_untracked(),
+                };
+                if let Err(error) = storage::save_audio_sync_preferences(&preferences).await {
+                    set_notice.set(Some(UiNotice::warning(
+                        "Audio sync area changed, but not persisted",
+                        error,
+                    )));
+                }
+            });
+        }
+    });
+
+    let select_pipewire_target = Callback::new({
+        move |target_object: String| {
+            let trimmed = target_object.trim().to_string();
+            set_selected_pipewire_target_object.set(trimmed.clone());
+            spawn_local(async move {
+                let preferences = AudioSyncPreferences {
+                    selected_entertainment_area_id: if selected_entertainment_area_id
+                        .get_untracked()
+                        .trim()
+                        .is_empty()
+                    {
+                        None
+                    } else {
+                        Some(selected_entertainment_area_id.get_untracked())
+                    },
+                    selected_pipewire_target_object: if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed)
+                    },
+                    selected_sync_speed_mode: selected_sync_speed_mode.get_untracked(),
+                    selected_sync_color_palette: selected_sync_color_palette.get_untracked(),
+                };
+                if let Err(error) = storage::save_audio_sync_preferences(&preferences).await {
+                    set_notice.set(Some(UiNotice::warning(
+                        "PipeWire output changed, but not persisted",
+                        error,
+                    )));
+                }
+            });
+        }
+    });
+
+    let select_sync_speed_mode = Callback::new({
+        move |mode: AudioSyncSpeedMode| {
+            set_selected_sync_speed_mode.set(mode);
+            spawn_local(async move {
+                let preferences = AudioSyncPreferences {
+                    selected_entertainment_area_id: if selected_entertainment_area_id
+                        .get_untracked()
+                        .trim()
+                        .is_empty()
+                    {
+                        None
+                    } else {
+                        Some(selected_entertainment_area_id.get_untracked())
+                    },
+                    selected_pipewire_target_object: if selected_pipewire_target_object
+                        .get_untracked()
+                        .trim()
+                        .is_empty()
+                    {
+                        None
+                    } else {
+                        Some(selected_pipewire_target_object.get_untracked())
+                    },
+                    selected_sync_speed_mode: mode,
+                    selected_sync_color_palette: selected_sync_color_palette.get_untracked(),
+                };
+                if let Err(error) = storage::save_audio_sync_preferences(&preferences).await {
+                    set_notice.set(Some(UiNotice::warning(
+                        "Sync speed changed, but not persisted",
+                        error,
+                    )));
+                }
+            });
+        }
+    });
+
+    let select_sync_color_palette = Callback::new({
+        move |palette: AudioSyncColorPalette| {
+            set_selected_sync_color_palette.set(palette);
+            spawn_local(async move {
+                let preferences = AudioSyncPreferences {
+                    selected_entertainment_area_id: if selected_entertainment_area_id
+                        .get_untracked()
+                        .trim()
+                        .is_empty()
+                    {
+                        None
+                    } else {
+                        Some(selected_entertainment_area_id.get_untracked())
+                    },
+                    selected_pipewire_target_object: if selected_pipewire_target_object
+                        .get_untracked()
+                        .trim()
+                        .is_empty()
+                    {
+                        None
+                    } else {
+                        Some(selected_pipewire_target_object.get_untracked())
+                    },
+                    selected_sync_speed_mode: selected_sync_speed_mode.get_untracked(),
+                    selected_sync_color_palette: palette,
+                };
+                if let Err(error) = storage::save_audio_sync_preferences(&preferences).await {
+                    set_notice.set(Some(UiNotice::warning(
+                        "Sync palette changed, but not persisted",
+                        error,
+                    )));
+                }
+            });
+        }
+    });
+
+    let start_audio_sync = Callback::new({
+        move |()| {
+            if is_audio_sync_starting.get_untracked() {
+                return;
+            }
+
+            let Some(connection) = active_connection.get_untracked() else {
+                set_notice.set(Some(UiNotice::warning(
+                    "No active bridge connection",
+                    "Connect to the bridge before starting Hue audio sync.",
+                )));
+                return;
+            };
+
+            if connection.client_key.as_deref().unwrap_or("").is_empty() {
+                set_notice.set(Some(UiNotice::warning(
+                    "Streaming credentials missing",
+                    "This bridge session does not have the Hue client key needed for Entertainment streaming. Pair this app again from settings to enable audio sync.",
+                )));
+                return;
+            }
+
+            let area_id = selected_entertainment_area_id
+                .get_untracked()
+                .trim()
+                .to_string();
+            if area_id.is_empty() {
+                set_notice.set(Some(UiNotice::warning(
+                    "Entertainment area required",
+                    "Create or choose an entertainment area in the Hue app before starting audio sync.",
+                )));
+                return;
+            }
+
+            let pipewire_target_object = selected_pipewire_target_object
+                .get_untracked()
+                .trim()
+                .to_string();
+            let speed_mode = selected_sync_speed_mode.get_untracked();
+            let color_palette = selected_sync_color_palette.get_untracked();
+            let areas = entertainment_areas.get_untracked();
+            let current_groups = groups.get_untracked();
+            let current_lights = lights.get_untracked();
+            let (base_color_hex, brightness_ceiling) = if matches!(
+                color_palette,
+                AudioSyncColorPalette::CurrentRoom
+            ) {
+                derive_audio_sync_visual_profile(
+                    &areas,
+                    &current_groups,
+                    &current_lights,
+                    &scenes.get_untracked(),
+                    &active_scene_by_group.get_untracked(),
+                    last_activated_scene_id.get_untracked().as_deref(),
+                    &area_id,
+                )
+            } else {
+                (None, None)
+            };
+
+            set_is_audio_sync_starting.set(true);
+            spawn_local(async move {
+                match request_audio_sync_start(
+                    connection.clone(),
+                    area_id.clone(),
+                    pipewire_target_object,
+                    speed_mode,
+                    color_palette,
+                    &areas,
+                    &current_groups,
+                    &current_lights,
+                    &scenes.get_untracked(),
+                    &active_scene_by_group.get_untracked(),
+                    last_activated_scene_id.get_untracked().as_deref(),
+                ).await {
+                    Ok(result) => {
+                        set_active_connection.set(Some(result.connection.clone()));
+                        let _ = storage::save_bridge_connection(&result.connection).await;
+                        set_is_audio_syncing.set(true);
+                        set_is_audio_sync_starting.set(false);
+                        set_last_applied_audio_sync_selection.set(AudioSyncSelection {
+                            area_id: area_id.clone(),
+                            pipewire_target_object: selected_pipewire_target_object.get_untracked(),
+                            speed_mode,
+                            color_palette,
+                            base_color_hex,
+                            brightness_ceiling,
+                        });
+                        set_notice.set(Some(UiNotice::success(
+                            "Audio sync started",
+                            "Hue Entertainment streaming is active for the selected area.",
+                        )));
+                    }
+                    Err(error) => {
+                        set_is_audio_syncing.set(false);
+                        set_is_audio_sync_starting.set(false);
+                        set_notice.set(Some(UiNotice::error("Audio sync failed", error)));
+                    }
+                }
+            });
+        }
+    });
+
+    let stop_audio_sync = Callback::new({
+        move |()| {
+            spawn_local(async move {
+                match hue::stop_hue_audio_sync().await {
+                    Ok(()) => {
+                        set_is_audio_syncing.set(false);
+                        set_is_audio_sync_starting.set(false);
+                        set_notice.set(Some(UiNotice::success(
+                            "Audio sync stopped",
+                            "Hue Entertainment streaming has been disabled for the current area.",
+                        )));
+                    }
+                    Err(error) => {
+                        set_is_audio_sync_starting.set(false);
+                        set_notice.set(Some(UiNotice::error("Could not stop audio sync", error)));
+                    }
+                }
+            });
         }
     });
 
@@ -609,6 +1191,8 @@ pub fn App() -> impl IntoView {
             let refresh_connection = BridgeConnection {
                 bridge_ip: request.bridge_ip.clone(),
                 username: request.username.clone(),
+                client_key: None,
+                application_id: None,
             };
             let scene_name = scenes
                 .get_untracked()
@@ -626,6 +1210,7 @@ pub fn App() -> impl IntoView {
                                 active_scenes.insert(group_id, scene_id.clone());
                             });
                         }
+                        set_last_activated_scene_id.set(Some(scene_id.clone()));
 
                         let refresh_error = match fetch_bridge_snapshot(refresh_connection).await {
                             Ok((fetched_lights, fetched_scenes, fetched_groups)) => {
@@ -666,6 +1251,8 @@ pub fn App() -> impl IntoView {
             let refresh_connection = BridgeConnection {
                 bridge_ip: request.bridge_ip.clone(),
                 username: request.username.clone(),
+                client_key: None,
+                application_id: None,
             };
             let deleted_scene_name = scenes
                 .get_untracked()
@@ -1002,21 +1589,19 @@ pub fn App() -> impl IntoView {
                 }
             };
 
-            let room = match groups
-                .get_untracked()
-                .into_iter()
-                .find(|group| {
+            let room =
+                match groups.get_untracked().into_iter().find(|group| {
                     group.id == request.room_id && matches!(group.kind, GroupKind::Room)
                 }) {
-                Some(room) => room,
-                None => {
-                    set_notice.set(Some(UiNotice::warning(
-                        "Room not available",
-                        "Custom scene creation currently works only for bridge rooms.",
-                    )));
-                    return;
-                }
-            };
+                    Some(room) => room,
+                    None => {
+                        set_notice.set(Some(UiNotice::warning(
+                            "Room not available",
+                            "Custom scene creation currently works only for bridge rooms.",
+                        )));
+                        return;
+                    }
+                };
 
             let lights_by_id: HashMap<String, Light> = lights
                 .get_untracked()
@@ -1203,6 +1788,26 @@ pub fn App() -> impl IntoView {
                                 on_mode_change=set_theme_mode
                             />
 
+                            <AudioSyncPanel
+                                active_connection=active_connection
+                                entertainment_areas=entertainment_areas
+                                selected_entertainment_area_id=selected_entertainment_area_id
+                                pipewire_targets=pipewire_targets
+                                selected_pipewire_target_object=selected_pipewire_target_object
+                                selected_sync_speed_mode=selected_sync_speed_mode
+                                selected_sync_color_palette=selected_sync_color_palette
+                                is_loading_areas=is_loading_entertainment_areas
+                                is_loading_pipewire_targets=is_loading_pipewire_targets
+                                is_audio_syncing=is_audio_syncing
+                                is_audio_sync_starting=is_audio_sync_starting
+                                on_select_area=select_entertainment_area
+                                on_select_pipewire_target=select_pipewire_target
+                                on_select_sync_speed_mode=select_sync_speed_mode
+                                on_select_sync_color_palette=select_sync_color_palette
+                                on_start=start_audio_sync
+                                on_stop=stop_audio_sync
+                            />
+
                             <BridgePanel
                                 discovered_bridges=discovered_bridges
                                 selected_bridge_ip=selected_bridge_ip
@@ -1362,6 +1967,75 @@ async fn fetch_bridge_snapshot(
     Ok((fetched_lights, fetched_scenes, fetched_groups))
 }
 
+async fn request_audio_sync_start(
+    connection: BridgeConnection,
+    entertainment_area_id: String,
+    pipewire_target_object: String,
+    speed_mode: AudioSyncSpeedMode,
+    color_palette: AudioSyncColorPalette,
+    entertainment_areas: &[EntertainmentArea],
+    groups: &[Group],
+    lights: &[Light],
+    scenes: &[Scene],
+    active_scene_by_group: &HashMap<String, String>,
+    last_activated_scene_id: Option<&str>,
+) -> Result<hue::AudioSyncStartResult, String> {
+    let (base_color_hex, brightness_ceiling) = derive_audio_sync_visual_profile(
+        entertainment_areas,
+        groups,
+        lights,
+        scenes,
+        active_scene_by_group,
+        last_activated_scene_id,
+        &entertainment_area_id,
+    );
+
+    hue::start_hue_audio_sync(AudioSyncStartRequest {
+        connection,
+        entertainment_area_id,
+        pipewire_target_object: if pipewire_target_object.trim().is_empty() {
+            None
+        } else {
+            Some(pipewire_target_object)
+        },
+        speed_mode,
+        color_palette,
+        base_color_hex,
+        brightness_ceiling,
+    })
+    .await
+}
+
+async fn request_audio_sync_update(
+    speed_mode: AudioSyncSpeedMode,
+    color_palette: AudioSyncColorPalette,
+    entertainment_areas: &[EntertainmentArea],
+    groups: &[Group],
+    lights: &[Light],
+    scenes: &[Scene],
+    active_scene_by_group: &HashMap<String, String>,
+    last_activated_scene_id: Option<&str>,
+    entertainment_area_id: &str,
+) -> Result<(), String> {
+    let (base_color_hex, brightness_ceiling) = derive_audio_sync_visual_profile(
+        entertainment_areas,
+        groups,
+        lights,
+        scenes,
+        active_scene_by_group,
+        last_activated_scene_id,
+        entertainment_area_id,
+    );
+
+    hue::update_hue_audio_sync(AudioSyncUpdateRequest {
+        speed_mode,
+        color_palette,
+        base_color_hex,
+        brightness_ceiling,
+    })
+    .await
+}
+
 async fn create_room_scene_pack(
     connection: BridgeConnection,
     room_group_id: String,
@@ -1504,6 +2178,236 @@ fn apply_state_update(light: &mut Light, state: &LightStateUpdate) {
         light.hue = Some(hue);
         light.xy = None;
     }
+}
+
+fn derive_audio_sync_visual_profile(
+    areas: &[EntertainmentArea],
+    groups: &[Group],
+    lights: &[Light],
+    scenes: &[Scene],
+    active_scene_by_group: &HashMap<String, String>,
+    last_activated_scene_id: Option<&str>,
+    area_id: &str,
+) -> (Option<String>, Option<u8>) {
+    let selected_scene = last_activated_scene_id
+        .and_then(|scene_id| scenes.iter().find(|scene| scene.id == scene_id));
+    let matched_group = areas
+        .iter()
+        .find(|area| area.id == area_id)
+        .and_then(|area| best_matching_audio_sync_group(area, groups));
+    let scene_group = selected_scene
+        .and_then(|scene| scene.group_id.as_deref())
+        .and_then(|group_id| groups.iter().find(|group| group.id == group_id));
+    let brightness_group = scene_group.or(matched_group);
+
+    let brightness = brightness_group
+        .and_then(|group| lights_for_group(group, lights).map(|group_lights| average_light_brightness(&group_lights)))
+        .flatten()
+        .or_else(|| average_light_brightness(&lights.iter().collect::<Vec<_>>()));
+
+    let color = selected_scene
+        .and_then(|scene| scene.preview_color_main.clone())
+        .or_else(|| {
+            matched_group
+                .and_then(|group| {
+                    active_scene_by_group
+                        .get(&group.id)
+                        .and_then(|scene_id| scenes.iter().find(|scene| scene.id == *scene_id))
+                })
+                .and_then(|scene| scene.preview_color_main.clone())
+        })
+        .or_else(|| {
+            brightness_group
+                .and_then(|group| lights_for_group(group, lights))
+                .and_then(|group_lights| average_light_color_identity_rgb(&group_lights).map(rgb_to_hex))
+        });
+
+    (color, brightness)
+}
+
+fn lights_for_group<'a>(group: &'a Group, lights: &'a [Light]) -> Option<Vec<&'a Light>> {
+    let group_lights = group
+        .light_ids
+        .iter()
+        .filter_map(|light_id| lights.iter().find(|light| light.id == *light_id))
+        .collect::<Vec<_>>();
+
+    if group_lights.is_empty() {
+        None
+    } else {
+        Some(group_lights)
+    }
+}
+
+fn best_matching_audio_sync_group<'a>(
+    area: &EntertainmentArea,
+    groups: &'a [Group],
+) -> Option<&'a Group> {
+    let area_name = normalize_audio_sync_name(&area.name);
+    let mut best: Option<(&Group, usize)> = None;
+
+    for group in groups.iter().filter(|group| {
+        matches!(group.kind, GroupKind::Room | GroupKind::Zone) && !group.light_ids.is_empty()
+    }) {
+        let group_name = normalize_audio_sync_name(&group.name);
+        let score = if area_name == group_name {
+            100
+        } else if area_name.contains(&group_name) || group_name.contains(&area_name) {
+            75
+        } else {
+            let overlap = shared_token_count(&area_name, &group_name);
+            if overlap == 0 {
+                continue;
+            }
+            overlap * 10
+        };
+
+        match best {
+            Some((_, best_score)) if best_score >= score => {}
+            _ => best = Some((group, score)),
+        }
+    }
+
+    best.map(|(group, _)| group)
+}
+
+fn normalize_audio_sync_name(name: &str) -> String {
+    name.to_lowercase()
+        .replace("entertainment", "")
+        .replace("area", "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string()
+}
+
+fn shared_token_count(left: &str, right: &str) -> usize {
+    let right_tokens = right.split_whitespace().collect::<HashSet<_>>();
+    left.split_whitespace()
+        .filter(|token| right_tokens.contains(token))
+        .count()
+}
+
+fn average_light_brightness(lights: &[&Light]) -> Option<u8> {
+    let (sum, count) = lights
+        .iter()
+        .filter_map(|light| light.brightness.map(u32::from))
+        .fold((0_u32, 0_u32), |(sum, count), value| {
+            (sum + value, count + 1)
+        });
+
+    let raw_average = sum.checked_div(count)? as f32;
+    Some(((raw_average / 254.0) * 100.0).round().clamp(1.0, 100.0) as u8)
+}
+
+fn average_light_color_identity_rgb(lights: &[&Light]) -> Option<(u8, u8, u8)> {
+    let (sum_red, sum_green, sum_blue, count) = lights
+        .iter()
+        .filter_map(|light| light_color_identity_rgb(light))
+        .fold(
+            (0_u32, 0_u32, 0_u32, 0_u32),
+            |(sr, sg, sb, count), (r, g, b)| {
+                (
+                    sr + u32::from(r),
+                    sg + u32::from(g),
+                    sb + u32::from(b),
+                    count + 1,
+                )
+            },
+        );
+
+    Some((
+        sum_red.checked_div(count)? as u8,
+        sum_green.checked_div(count)? as u8,
+        sum_blue.checked_div(count)? as u8,
+    ))
+}
+
+fn light_color_identity_rgb(light: &Light) -> Option<(u8, u8, u8)> {
+    if let Some([x, y]) = light.xy {
+        if let Some(rgb) = xy_to_rgb(x, y, 254) {
+            return Some(rgb);
+        }
+    }
+
+    let hue = light.hue?;
+    let saturation = light.saturation?;
+    Some(hsv_to_rgb(hue, saturation, 254))
+}
+
+fn rgb_to_hex((red, green, blue): (u8, u8, u8)) -> String {
+    format!("#{red:02x}{green:02x}{blue:02x}")
+}
+
+fn hsv_to_rgb(hue: u16, saturation: u8, brightness: u8) -> (u8, u8, u8) {
+    let hue = (hue as f32 / 65_535.0) * 360.0;
+    let saturation = (saturation as f32 / 254.0).clamp(0.0, 1.0);
+    let value = ((brightness as f32 / 254.0) * 0.12 + 0.86).clamp(0.0, 1.0);
+    hsv_to_rgb_float(hue, saturation, value)
+}
+
+fn xy_to_rgb(x: f32, y: f32, brightness: u8) -> Option<(u8, u8, u8)> {
+    if !(0.0..=1.0).contains(&x) || !(0.0..=1.0).contains(&y) || y <= f32::EPSILON {
+        return None;
+    }
+
+    let z = 1.0 - x - y;
+    let luminance = (brightness as f32 / 254.0).clamp(0.08, 1.0);
+    let x_component = (luminance / y) * x;
+    let z_component = (luminance / y) * z;
+
+    let mut red = x_component * 1.656492 - luminance * 0.354851 - z_component * 0.255038;
+    let mut green = -x_component * 0.707196 + luminance * 1.655397 + z_component * 0.036152;
+    let mut blue = x_component * 0.051713 - luminance * 0.121364 + z_component * 1.01153;
+
+    red = gamma_correct(red.max(0.0));
+    green = gamma_correct(green.max(0.0));
+    blue = gamma_correct(blue.max(0.0));
+
+    let max = red.max(green).max(blue);
+    if max > 1.0 {
+        red /= max;
+        green /= max;
+        blue /= max;
+    }
+
+    Some((
+        (red * 255.0).round() as u8,
+        (green * 255.0).round() as u8,
+        (blue * 255.0).round() as u8,
+    ))
+}
+
+fn gamma_correct(component: f32) -> f32 {
+    if component <= 0.003_130_8 {
+        12.92 * component
+    } else {
+        (1.0 + 0.055) * component.powf(1.0 / 2.4) - 0.055
+    }
+}
+
+fn hsv_to_rgb_float(hue: f32, saturation: f32, value: f32) -> (u8, u8, u8) {
+    let hue = hue.rem_euclid(360.0);
+    let chroma = value * saturation;
+    let segment = hue / 60.0;
+    let x = chroma * (1.0 - ((segment % 2.0) - 1.0).abs());
+
+    let (red, green, blue) = match segment as u32 {
+        0 => (chroma, x, 0.0),
+        1 => (x, chroma, 0.0),
+        2 => (0.0, chroma, x),
+        3 => (0.0, x, chroma),
+        4 => (x, 0.0, chroma),
+        _ => (chroma, 0.0, x),
+    };
+
+    let match_value = value - chroma;
+    (
+        ((red + match_value) * 255.0).round() as u8,
+        ((green + match_value) * 255.0).round() as u8,
+        ((blue + match_value) * 255.0).round() as u8,
+    )
 }
 
 fn pluralize(count: usize) -> &'static str {

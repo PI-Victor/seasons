@@ -15,6 +15,10 @@ pub struct DiscoveredBridge {
 pub struct BridgeConnection {
     pub bridge_ip: String,
     pub username: String,
+    #[serde(default)]
+    pub client_key: Option<String>,
+    #[serde(default)]
+    pub application_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -28,7 +32,100 @@ pub struct CreateUserRequest {
 #[serde(rename_all = "camelCase")]
 pub struct RegisteredApp {
     pub username: String,
+    #[serde(default)]
     pub client_key: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EntertainmentArea {
+    pub id: String,
+    pub name: String,
+    pub configuration_type: Option<String>,
+    pub status: String,
+    pub channels: Vec<EntertainmentChannel>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EntertainmentChannel {
+    pub channel_id: u8,
+    pub position: EntertainmentPosition,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EntertainmentPosition {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioSyncStartRequest {
+    pub connection: BridgeConnection,
+    pub entertainment_area_id: String,
+    #[serde(default)]
+    pub pipewire_target_object: Option<String>,
+    #[serde(default)]
+    pub speed_mode: AudioSyncSpeedMode,
+    #[serde(default)]
+    pub color_palette: AudioSyncColorPalette,
+    #[serde(default)]
+    pub base_color_hex: Option<String>,
+    #[serde(default)]
+    pub brightness_ceiling: Option<u8>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioSyncUpdateRequest {
+    #[serde(default)]
+    pub speed_mode: AudioSyncSpeedMode,
+    #[serde(default)]
+    pub color_palette: AudioSyncColorPalette,
+    #[serde(default)]
+    pub base_color_hex: Option<String>,
+    #[serde(default)]
+    pub brightness_ceiling: Option<u8>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioSyncStartResult {
+    pub connection: BridgeConnection,
+    pub entertainment_area_id: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AudioSyncSpeedMode {
+    Slow,
+    #[default]
+    Medium,
+    High,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AudioSyncColorPalette {
+    #[default]
+    CurrentRoom,
+    Sunset,
+    Aurora,
+    Ocean,
+    Rose,
+    Mono,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PipeWireOutputTarget {
+    pub target_object: String,
+    pub name: String,
+    pub description: String,
+    pub media_class: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -296,6 +393,105 @@ pub(crate) type RawScenesResponse = BTreeMap<String, RawHueScene>;
 pub(crate) type RawSceneDetailResponse = RawHueSceneDetail;
 pub(crate) type RawStateChangeSuccess = HashMap<String, Value>;
 pub(crate) type RawSceneCreateSuccess = HashMap<String, String>;
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ClipV2ListResponse<T> {
+    pub data: Vec<T>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawEntertainmentArea {
+    pub id: String,
+    pub metadata: RawEntertainmentAreaMetadata,
+    #[serde(default)]
+    pub configuration_type: Option<String>,
+    #[serde(default)]
+    pub status: RawEntertainmentAreaStatus,
+    #[serde(default)]
+    pub channels: Vec<RawEntertainmentChannel>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawEntertainmentAreaMetadata {
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub(crate) enum RawEntertainmentAreaStatus {
+    String(String),
+    Object {
+        #[serde(default = "default_inactive_status")]
+        status: String,
+    },
+}
+
+impl Default for RawEntertainmentAreaStatus {
+    fn default() -> Self {
+        Self::String(default_inactive_status())
+    }
+}
+
+impl RawEntertainmentAreaStatus {
+    fn into_status(self) -> String {
+        match self {
+            Self::String(status) => status,
+            Self::Object { status } => status,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawEntertainmentChannel {
+    pub channel_id: u8,
+    pub position: RawEntertainmentPosition,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawEntertainmentPosition {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+impl From<RawEntertainmentArea> for EntertainmentArea {
+    fn from(raw: RawEntertainmentArea) -> Self {
+        Self {
+            id: raw.id,
+            name: raw.metadata.name,
+            configuration_type: raw.configuration_type,
+            status: raw.status.into_status(),
+            channels: raw
+                .channels
+                .into_iter()
+                .map(EntertainmentChannel::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<RawEntertainmentChannel> for EntertainmentChannel {
+    fn from(raw: RawEntertainmentChannel) -> Self {
+        Self {
+            channel_id: raw.channel_id,
+            position: EntertainmentPosition::from(raw.position),
+        }
+    }
+}
+
+impl From<RawEntertainmentPosition> for EntertainmentPosition {
+    fn from(raw: RawEntertainmentPosition) -> Self {
+        Self {
+            x: raw.x,
+            y: raw.y,
+            z: raw.z,
+        }
+    }
+}
+
+fn default_inactive_status() -> String {
+    "inactive".to_string()
+}
 
 #[cfg(test)]
 mod tests {

@@ -36,10 +36,22 @@ impl HueBridgeConfig {
         format!("https://{}/api", self.bridge_ip)
     }
 
+    pub fn clip_v2_base_url(&self) -> String {
+        format!("https://{}/clip/v2", self.bridge_ip)
+    }
+
+    pub fn auth_v1_url(&self) -> String {
+        format!("https://{}/auth/v1", self.bridge_ip)
+    }
+
     pub fn authenticated_api_base_url(&self) -> Result<String, HueError> {
         let username = self.username.as_deref().ok_or(HueError::MissingUsername)?;
 
         Ok(format!("{}/{}", self.api_base_url(), username))
+    }
+
+    pub fn application_key(&self) -> Result<&str, HueError> {
+        self.username.as_deref().ok_or(HueError::MissingUsername)
     }
 }
 

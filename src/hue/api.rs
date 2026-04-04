@@ -1,7 +1,7 @@
 use crate::hue::models::{
-    ActivateSceneRequest, BridgeConnection, CreateSceneRequest, CreateUserRequest,
-    DeleteSceneRequest, DiscoveredBridge, Group, Light, RegisteredApp, Scene,
-    SetLightStateRequest,
+    ActivateSceneRequest, AudioSyncStartRequest, AudioSyncStartResult, AudioSyncUpdateRequest, BridgeConnection,
+    CreateSceneRequest, CreateUserRequest, DeleteSceneRequest, DiscoveredBridge, EntertainmentArea,
+    Group, Light, PipeWireOutputTarget, RegisteredApp, Scene, SetLightStateRequest,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -27,6 +27,20 @@ pub async fn list_hue_groups(connection: BridgeConnection) -> Result<Vec<Group>,
     invoke_with_named_args("list_hue_groups", &[("connection", &connection)]).await
 }
 
+pub async fn list_hue_entertainment_areas(
+    connection: BridgeConnection,
+) -> Result<Vec<EntertainmentArea>, String> {
+    invoke_with_named_args(
+        "list_hue_entertainment_areas",
+        &[("connection", &connection)],
+    )
+    .await
+}
+
+pub async fn list_pipewire_output_targets() -> Result<Vec<PipeWireOutputTarget>, String> {
+    invoke_without_args("list_pipewire_output_targets").await
+}
+
 pub async fn set_hue_light_state(request: SetLightStateRequest) -> Result<(), String> {
     invoke_with_named_args("set_hue_light_state", &[("request", &request)]).await
 }
@@ -41,6 +55,20 @@ pub async fn create_hue_scene(request: CreateSceneRequest) -> Result<Scene, Stri
 
 pub async fn delete_hue_scene(request: DeleteSceneRequest) -> Result<(), String> {
     invoke_with_named_args("delete_hue_scene", &[("request", &request)]).await
+}
+
+pub async fn start_hue_audio_sync(
+    request: AudioSyncStartRequest,
+) -> Result<AudioSyncStartResult, String> {
+    invoke_with_named_args("start_hue_audio_sync", &[("request", &request)]).await
+}
+
+pub async fn stop_hue_audio_sync() -> Result<(), String> {
+    invoke_without_args("stop_hue_audio_sync").await
+}
+
+pub async fn update_hue_audio_sync(request: AudioSyncUpdateRequest) -> Result<(), String> {
+    invoke_with_named_args("update_hue_audio_sync", &[("request", &request)]).await
 }
 
 async fn invoke_without_args<T>(cmd: &str) -> Result<T, String>

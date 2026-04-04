@@ -1,4 +1,4 @@
-use crate::hue::BridgeConnection;
+use crate::hue::{AudioSyncColorPalette, AudioSyncSpeedMode, BridgeConnection};
 use crate::theme::ThemePreference;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -21,12 +21,23 @@ pub struct SaveRoomOrderRequest {
 struct AppConfigFile {
     last_connection: Option<BridgeConnection>,
     theme_preference: ThemePreference,
+    audio_sync: AudioSyncPreferences,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(default)]
 struct AppDataFile {
     room_orders: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioSyncPreferences {
+    pub selected_entertainment_area_id: Option<String>,
+    pub selected_pipewire_target_object: Option<String>,
+    pub selected_sync_speed_mode: AudioSyncSpeedMode,
+    pub selected_sync_color_palette: AudioSyncColorPalette,
 }
 
 pub fn load_bridge_connection() -> Result<Option<BridgeConnection>, String> {
@@ -54,6 +65,17 @@ pub fn load_theme_preference() -> Result<ThemePreference, String> {
 pub fn save_theme_preference(preference: &ThemePreference) -> Result<(), String> {
     let mut config = read_json::<AppConfigFile>(&config_file_path()?)?;
     config.theme_preference = preference.clone();
+    write_json(&config_file_path()?, &config)
+}
+
+pub fn load_audio_sync_preferences() -> Result<AudioSyncPreferences, String> {
+    let config = read_json::<AppConfigFile>(&config_file_path()?)?;
+    Ok(config.audio_sync)
+}
+
+pub fn save_audio_sync_preferences(preferences: &AudioSyncPreferences) -> Result<(), String> {
+    let mut config = read_json::<AppConfigFile>(&config_file_path()?)?;
+    config.audio_sync = preferences.clone();
     write_json(&config_file_path()?, &config)
 }
 
@@ -168,8 +190,8 @@ fn room_order_key(connection: &BridgeConnection) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{room_order_key, AppConfigFile, AppDataFile};
-    use crate::hue::BridgeConnection;
+    use super::{room_order_key, AppConfigFile, AppDataFile, AudioSyncPreferences};
+    use crate::hue::{AudioSyncColorPalette, AudioSyncSpeedMode, BridgeConnection};
     use crate::theme::{ThemeMode, ThemePalette, ThemePreference};
 
     #[test]
@@ -177,6 +199,8 @@ mod tests {
         let connection = BridgeConnection {
             bridge_ip: "172.16.0.10".to_string(),
             username: "user-token".to_string(),
+            client_key: None,
+            application_id: None,
         };
 
         assert_eq!(room_order_key(&connection), "172.16.0.10::user-token");
@@ -193,6 +217,15 @@ mod tests {
             ThemePreference {
                 palette: ThemePalette::RosePine,
                 mode: ThemeMode::System,
+            }
+        );
+        assert_eq!(
+            config.audio_sync,
+            AudioSyncPreferences {
+                selected_entertainment_area_id: None,
+                selected_pipewire_target_object: None,
+                selected_sync_speed_mode: AudioSyncSpeedMode::Medium,
+                selected_sync_color_palette: AudioSyncColorPalette::CurrentRoom,
             }
         );
         assert!(data.room_orders.is_empty());

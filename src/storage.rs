@@ -1,6 +1,6 @@
-use crate::hue::BridgeConnection;
+use crate::hue::{AudioSyncColorPalette, AudioSyncSpeedMode, BridgeConnection};
 use crate::theme::ThemePreference;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
@@ -9,6 +9,16 @@ use wasm_bindgen_futures::JsFuture;
 struct SaveRoomOrderRequest {
     connection: BridgeConnection,
     room_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioSyncPreferences {
+    pub selected_entertainment_area_id: Option<String>,
+    pub selected_pipewire_target_object: Option<String>,
+    pub selected_sync_speed_mode: AudioSyncSpeedMode,
+    pub selected_sync_color_palette: AudioSyncColorPalette,
 }
 
 pub async fn load_bridge_connection() -> Result<Option<BridgeConnection>, String> {
@@ -37,6 +47,18 @@ pub async fn save_theme_preference(preference: &ThemePreference) -> Result<(), S
 
 pub async fn load_room_order(connection: &BridgeConnection) -> Result<Vec<String>, String> {
     invoke_with_named_args("load_persisted_room_order", &[("connection", connection)]).await
+}
+
+pub async fn load_audio_sync_preferences() -> Result<AudioSyncPreferences, String> {
+    invoke_without_args("load_audio_sync_preferences").await
+}
+
+pub async fn save_audio_sync_preferences(preferences: &AudioSyncPreferences) -> Result<(), String> {
+    invoke_with_named_args(
+        "save_audio_sync_preferences",
+        &[("preferences", preferences)],
+    )
+    .await
 }
 
 pub async fn save_room_order(

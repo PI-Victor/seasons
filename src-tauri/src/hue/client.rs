@@ -1,12 +1,17 @@
 use crate::hue::config::HueBridgeConfig;
 use crate::hue::error::HueError;
 use crate::hue::models::{
-    CreateUserSuccessPayload, DiscoveredBridge, Group, HueApiResponse, Light, LightStateUpdate,
-    RawGroupsResponse, RawLightsResponse, RawSceneCreateSuccess, RawSceneDetailResponse,
-    RawScenesResponse, RawStateChangeSuccess, RegisteredApp, Scene,
+    ClipV2ListResponse, CreateUserSuccessPayload, DiscoveredBridge, EntertainmentArea, Group,
+    HueApiResponse, Light, LightStateUpdate, RawEntertainmentArea, RawGroupsResponse,
+    RawLightsResponse, RawSceneCreateSuccess, RawSceneDetailResponse, RawScenesResponse,
+    RawStateChangeSuccess, RegisteredApp, Scene,
 };
 use reqwest::Client;
 use serde_json::Value;
+use tracing::{debug, info};
+
+const HUE_APPLICATION_KEY_HEADER: &str = "hue-application-key";
+const HUE_APPLICATION_ID_HEADER: &str = "hue-application-id";
 
 pub struct HueBridgeClient {
     http: Client,
@@ -51,7 +56,10 @@ impl HueBridgeClient {
         let response = self
             .http
             .post(self.config.api_base_url())
-            .json(&serde_json::json!({ "devicetype": device_type }))
+            .json(&serde_json::json!({
+                "devicetype": device_type,
+                "generateclientkey": true
+            }))
             .send()
             .await?
             .error_for_status()?;
@@ -66,6 +74,71 @@ impl HueBridgeClient {
             username: created.username,
             client_key: created.clientkey,
         })
+    }
+
+    pub async fn resolve_application_id(&self) -> Result<String, HueError> {
+        debug!(auth_url = %self.config.auth_v1_url(), "requesting hue-application-id");
+        let response = self
+            .http
+            .get(self.config.auth_v1_url())
+            .header(HUE_APPLICATION_KEY_HEADER, self.config.application_key()?)
+            .send()
+            .await?
+            .error_for_status()?;
+
+        let application_id = response
+            .headers()
+            .get(HUE_APPLICATION_ID_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or(HueError::UnexpectedResponse(
+                "the bridge did not return a hue-application-id header",
+            ))?;
+
+        Ok(application_id.to_string())
+    }
+
+    pub async fn list_entertainment_areas(&self) -> Result<Vec<EntertainmentArea>, HueError> {
+        debug!(clip_v2_url = %self.config.clip_v2_base_url(), "listing Hue entertainment areas");
+        let endpoint = format!(
+            "{}/resource/entertainment_configuration",
+            self.config.clip_v2_base_url()
+        );
+
+        let body = self
+            .http
+            .get(endpoint)
+            .header(HUE_APPLICATION_KEY_HEADER, self.config.application_key()?)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+
+        let mut areas = serde_json::from_str::<ClipV2ListResponse<RawEntertainmentArea>>(&body)
+            .map_err(|_| extract_api_error(&body))?
+            .data
+            .into_iter()
+            .map(EntertainmentArea::from)
+            .collect::<Vec<_>>();
+        areas.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
+        info!(count = areas.len(), "loaded Hue entertainment areas");
+        Ok(areas)
+    }
+
+    pub async fn start_entertainment_area(&self, area_id: &str) -> Result<(), HueError> {
+        info!(area_id, "sending Hue entertainment area start action");
+        self.set_entertainment_area_action(area_id, "start").await?;
+        self.wait_for_entertainment_area_status(area_id, "active")
+            .await
+    }
+
+    pub async fn stop_entertainment_area(&self, area_id: &str) -> Result<(), HueError> {
+        info!(area_id, "sending Hue entertainment area stop action");
+        self.set_entertainment_area_action(area_id, "stop").await?;
+        self.wait_for_entertainment_area_status(area_id, "inactive")
+            .await
     }
 
     pub async fn list_lights(&self) -> Result<Vec<Light>, HueError> {
@@ -388,6 +461,84 @@ impl HueBridgeClient {
         scenes.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
         Ok(scenes)
     }
+
+    async fn fetch_entertainment_area(&self, area_id: &str) -> Result<EntertainmentArea, HueError> {
+        let area_id = area_id.trim();
+        if area_id.is_empty() {
+            return Err(HueError::InvalidConfig("entertainment area ID is required"));
+        }
+
+        let endpoint = format!(
+            "{}/resource/entertainment_configuration/{area_id}",
+            self.config.clip_v2_base_url()
+        );
+
+        let body = self
+            .http
+            .get(endpoint)
+            .header(HUE_APPLICATION_KEY_HEADER, self.config.application_key()?)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+
+        let area = serde_json::from_str::<ClipV2ListResponse<RawEntertainmentArea>>(&body)
+            .map_err(|_| extract_api_error(&body))?
+            .data
+            .into_iter()
+            .next()
+            .ok_or(HueError::UnexpectedResponse(
+                "the bridge returned an empty entertainment area response",
+            ))?;
+
+        Ok(EntertainmentArea::from(area))
+    }
+
+    async fn set_entertainment_area_action(
+        &self,
+        area_id: &str,
+        action: &str,
+    ) -> Result<(), HueError> {
+        let area_id = area_id.trim();
+        if area_id.is_empty() {
+            return Err(HueError::InvalidConfig("entertainment area ID is required"));
+        }
+
+        let endpoint = format!(
+            "{}/resource/entertainment_configuration/{area_id}",
+            self.config.clip_v2_base_url()
+        );
+
+        self.http
+            .put(endpoint)
+            .header(HUE_APPLICATION_KEY_HEADER, self.config.application_key()?)
+            .json(&serde_json::json!({ "action": action }))
+            .send()
+            .await?
+            .error_for_status()?;
+
+        Ok(())
+    }
+
+    async fn wait_for_entertainment_area_status(
+        &self,
+        area_id: &str,
+        expected_status: &str,
+    ) -> Result<(), HueError> {
+        for _ in 0..20 {
+            let area = self.fetch_entertainment_area(area_id).await?;
+            if area.status.eq_ignore_ascii_case(expected_status) {
+                return Ok(());
+            }
+
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        }
+
+        Err(HueError::UnexpectedResponse(
+            "the entertainment area did not reach the requested status in time",
+        ))
+    }
 }
 
 fn group_scene_create_body(scene_name: &str, group_id: &str) -> serde_json::Value {
@@ -461,7 +612,11 @@ fn ensure_success_only(
     Ok(())
 }
 
-fn ensure_success_body(body: &str, empty_ok: bool, opaque_success_ok: bool) -> Result<(), HueError> {
+fn ensure_success_body(
+    body: &str,
+    empty_ok: bool,
+    opaque_success_ok: bool,
+) -> Result<(), HueError> {
     if empty_ok && body.trim().is_empty() {
         return Ok(());
     }
@@ -527,7 +682,9 @@ fn extract_created_scene_id(
 }
 
 fn scene_id_from_path(value: &str) -> Option<&str> {
-    value.strip_prefix("/scenes/").filter(|scene_id| !scene_id.is_empty())
+    value
+        .strip_prefix("/scenes/")
+        .filter(|scene_id| !scene_id.is_empty())
 }
 
 fn recover_created_scene_id(
@@ -850,7 +1007,10 @@ mod tests {
 
     #[test]
     fn extracts_scene_id_from_scene_path() {
-        assert_eq!(scene_id_from_path("/scenes/desk-evening"), Some("desk-evening"));
+        assert_eq!(
+            scene_id_from_path("/scenes/desk-evening"),
+            Some("desk-evening")
+        );
         assert_eq!(scene_id_from_path("desk-evening"), None);
         assert_eq!(scene_id_from_path("/scenes/"), None);
     }

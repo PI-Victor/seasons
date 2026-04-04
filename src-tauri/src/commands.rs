@@ -1,19 +1,24 @@
 use crate::app_state::{
     clear_bridge_connection as state_clear_bridge_connection,
     clear_room_order as state_clear_room_order,
+    load_audio_sync_preferences as state_load_audio_sync_preferences,
     load_bridge_connection as state_load_bridge_connection,
     load_room_order as state_load_room_order, load_theme_preference as state_load_theme_preference,
+    save_audio_sync_preferences as state_save_audio_sync_preferences,
     save_bridge_connection as state_save_bridge_connection,
     save_room_order as state_save_room_order, save_theme_preference as state_save_theme_preference,
-    SaveRoomOrderRequest,
+    AudioSyncPreferences, SaveRoomOrderRequest,
 };
+use crate::audio::{capture, AudioSyncManager};
 use crate::hue::{
-    ActivateSceneRequest, BridgeConnection, CreateSceneRequest, CreateUserRequest,
-    DeleteSceneRequest, DiscoveredBridge, Group, HueBridgeClient, HueBridgeConfig, Light,
-    RegisteredApp, Scene, SetLightStateRequest,
+    ActivateSceneRequest, AudioSyncStartRequest, AudioSyncStartResult, AudioSyncUpdateRequest, BridgeConnection,
+    CreateSceneRequest, CreateUserRequest, DeleteSceneRequest, DiscoveredBridge, EntertainmentArea,
+    Group, HueBridgeClient, HueBridgeConfig, Light, PipeWireOutputTarget, RegisteredApp, Scene,
+    SetLightStateRequest,
 };
 use crate::theme::ThemePreference;
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
+use tokio::time::{timeout, Duration};
 
 #[tauri::command]
 pub async fn discover_hue_bridges() -> Result<Vec<DiscoveredBridge>, String> {
@@ -43,6 +48,7 @@ pub async fn list_hue_lights(connection: BridgeConnection) -> Result<Vec<Light>,
     let BridgeConnection {
         bridge_ip,
         username,
+        ..
     } = connection;
 
     let config =
@@ -60,6 +66,7 @@ pub async fn list_hue_scenes(connection: BridgeConnection) -> Result<Vec<Scene>,
     let BridgeConnection {
         bridge_ip,
         username,
+        ..
     } = connection;
 
     let config =
@@ -77,6 +84,7 @@ pub async fn list_hue_groups(connection: BridgeConnection) -> Result<Vec<Group>,
     let BridgeConnection {
         bridge_ip,
         username,
+        ..
     } = connection;
 
     let config =
@@ -87,6 +95,31 @@ pub async fn list_hue_groups(connection: BridgeConnection) -> Result<Vec<Group>,
         .list_groups()
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn list_hue_entertainment_areas(
+    connection: BridgeConnection,
+) -> Result<Vec<EntertainmentArea>, String> {
+    let BridgeConnection {
+        bridge_ip,
+        username,
+        ..
+    } = connection;
+
+    let config =
+        HueBridgeConfig::authenticated(bridge_ip, username).map_err(|error| error.to_string())?;
+    let client = HueBridgeClient::new(config).map_err(|error| error.to_string())?;
+
+    client
+        .list_entertainment_areas()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn list_pipewire_output_targets() -> Result<Vec<PipeWireOutputTarget>, String> {
+    capture::list_output_targets().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -166,6 +199,79 @@ pub async fn delete_hue_scene(request: DeleteSceneRequest) -> Result<(), String>
 }
 
 #[tauri::command]
+pub async fn start_hue_audio_sync(
+    request: AudioSyncStartRequest,
+    audio_sync: State<'_, AudioSyncManager>,
+) -> Result<AudioSyncStartResult, String> {
+    let AudioSyncStartRequest {
+        connection,
+        entertainment_area_id,
+        pipewire_target_object,
+        speed_mode,
+        color_palette,
+        base_color_hex,
+        brightness_ceiling,
+    } = request;
+
+    let config =
+        HueBridgeConfig::authenticated(connection.bridge_ip.clone(), connection.username.clone())
+            .map_err(|error| error.to_string())?;
+    let client = HueBridgeClient::new(config).map_err(|error| error.to_string())?;
+    let area = client
+        .list_entertainment_areas()
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|area| area.id == entertainment_area_id)
+        .ok_or_else(|| "The selected entertainment area is no longer available.".to_string())?;
+
+    timeout(
+        Duration::from_secs(6),
+        audio_sync.start(
+            connection,
+            area,
+            pipewire_target_object,
+            speed_mode,
+            color_palette,
+            base_color_hex,
+            brightness_ceiling,
+        ),
+    )
+    .await
+    .map_err(|_| {
+        "Hue audio sync start timed out while waiting for the bridge or audio pipeline.".to_string()
+    })?
+    .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn stop_hue_audio_sync(audio_sync: State<'_, AudioSyncManager>) -> Result<(), String> {
+    audio_sync.stop().await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn update_hue_audio_sync(
+    request: AudioSyncUpdateRequest,
+    audio_sync: State<'_, AudioSyncManager>,
+) -> Result<(), String> {
+    let AudioSyncUpdateRequest {
+        speed_mode,
+        color_palette,
+        base_color_hex,
+        brightness_ceiling,
+    } = request;
+
+    audio_sync
+        .update(
+            speed_mode,
+            color_palette,
+            base_color_hex,
+            brightness_ceiling,
+        )
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn load_persisted_bridge_connection() -> Result<Option<BridgeConnection>, String> {
     state_load_bridge_connection()
 }
@@ -193,6 +299,16 @@ pub fn save_persisted_room_order(request: SaveRoomOrderRequest) -> Result<(), St
 #[tauri::command]
 pub fn clear_persisted_room_order(connection: BridgeConnection) -> Result<(), String> {
     state_clear_room_order(&connection)
+}
+
+#[tauri::command]
+pub fn load_audio_sync_preferences() -> Result<AudioSyncPreferences, String> {
+    state_load_audio_sync_preferences()
+}
+
+#[tauri::command]
+pub fn save_audio_sync_preferences(preferences: AudioSyncPreferences) -> Result<(), String> {
+    state_save_audio_sync_preferences(&preferences)
 }
 
 #[tauri::command]
