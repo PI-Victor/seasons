@@ -1,4 +1,5 @@
 use crate::hue::BridgeConnection;
+use crate::theme::ThemePreference;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -24,6 +25,14 @@ pub async fn save_bridge_connection(connection: &BridgeConnection) -> Result<(),
 
 pub async fn clear_bridge_connection() -> Result<(), String> {
     invoke_without_args("clear_persisted_bridge_connection").await
+}
+
+pub async fn load_theme_preference() -> Result<ThemePreference, String> {
+    invoke_without_args("load_theme_preference").await
+}
+
+pub async fn save_theme_preference(preference: &ThemePreference) -> Result<(), String> {
+    invoke_with_named_args("save_theme_preference", &[("preference", preference)]).await
 }
 
 pub async fn load_room_order(connection: &BridgeConnection) -> Result<Vec<String>, String> {

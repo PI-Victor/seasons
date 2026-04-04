@@ -2,8 +2,8 @@ use crate::hue::config::HueBridgeConfig;
 use crate::hue::error::HueError;
 use crate::hue::models::{
     CreateUserSuccessPayload, DiscoveredBridge, Group, HueApiResponse, Light, LightStateUpdate,
-    RawGroupsResponse, RawLightsResponse, RawSceneCreateSuccess, RawScenesResponse,
-    RawStateChangeSuccess, RegisteredApp, Scene,
+    RawGroupsResponse, RawLightsResponse, RawSceneCreateSuccess, RawSceneDetailResponse,
+    RawScenesResponse, RawStateChangeSuccess, RegisteredApp, Scene,
 };
 use reqwest::Client;
 use serde_json::Value;
@@ -110,6 +110,14 @@ impl HueBridgeClient {
                 }
             })
             .collect();
+
+        for scene in &mut scenes {
+            if let Some(preview) = self.fetch_scene_preview(scene.id.as_str()).await? {
+                scene.preview_color_soft = Some(preview.soft);
+                scene.preview_color_main = Some(preview.main);
+                scene.preview_color_deep = Some(preview.deep);
+            }
+        }
 
         scenes.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
         Ok(scenes)
@@ -272,13 +280,72 @@ impl HueBridgeClient {
                 .await?,
         )?;
 
+        let preview = self.fetch_scene_preview(scene_id.as_str()).await?;
+
         Ok(Scene {
             id: scene_id,
             name: scene_name.to_string(),
             group_id: Some(group_id.to_string()),
             light_count: light_ids.len(),
             scene_type: Some("GroupScene".to_string()),
+            preview_color_soft: preview.as_ref().map(|preview| preview.soft.clone()),
+            preview_color_main: preview.as_ref().map(|preview| preview.main.clone()),
+            preview_color_deep: preview.as_ref().map(|preview| preview.deep.clone()),
         })
+    }
+
+    async fn fetch_scene_preview(&self, scene_id: &str) -> Result<Option<ScenePreview>, HueError> {
+        let endpoint = format!(
+            "{}/scenes/{scene_id}",
+            self.config.authenticated_api_base_url()?
+        );
+
+        let body = self
+            .http
+            .get(endpoint)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+
+        let detail = match serde_json::from_str::<RawSceneDetailResponse>(&body) {
+            Ok(detail) => detail,
+            Err(_) => return Err(extract_api_error(&body)),
+        };
+
+        Ok(ScenePreview::from_lightstates(detail.lightstates.values()))
+    }
+}
+
+struct ScenePreview {
+    soft: String,
+    main: String,
+    deep: String,
+}
+
+impl ScenePreview {
+    fn from_lightstates<'a, I>(lightstates: I) -> Option<Self>
+    where
+        I: IntoIterator<Item = &'a crate::hue::models::RawHueSceneLightState>,
+    {
+        let colors: Vec<(u8, u8, u8)> = lightstates
+            .into_iter()
+            .filter_map(scene_lightstate_to_rgb)
+            .collect();
+
+        if colors.is_empty() {
+            return None;
+        }
+
+        let main_rgb = average_rgb(&colors);
+        let soft_rgb = tint_rgb(main_rgb, 0.34);
+        let deep_rgb = shade_rgb(main_rgb, 0.28);
+        let soft = rgb_to_css(soft_rgb);
+        let main = rgb_to_css(main_rgb);
+        let deep = rgb_to_css(deep_rgb);
+
+        Some(Self { soft, main, deep })
     }
 }
 
@@ -362,13 +429,177 @@ fn compare_light_ids(left: &str, right: &str) -> std::cmp::Ordering {
     }
 }
 
+fn scene_lightstate_to_rgb(
+    lightstate: &crate::hue::models::RawHueSceneLightState,
+) -> Option<(u8, u8, u8)> {
+    if matches!(lightstate.on, Some(false)) {
+        return None;
+    }
+
+    let brightness = lightstate.bri?;
+    if brightness == 0 {
+        return None;
+    }
+
+    if let Some([x, y]) = lightstate.xy {
+        return xy_brightness_to_rgb(x, y, brightness);
+    }
+
+    Some(hue_sat_bri_to_rgb(
+        lightstate.hue.unwrap_or(8_400),
+        lightstate.sat.unwrap_or(56),
+        brightness,
+    ))
+}
+
+fn average_rgb(colors: &[(u8, u8, u8)]) -> (u8, u8, u8) {
+    let count = colors.len().max(1) as u32;
+    let (red_sum, green_sum, blue_sum) = colors.iter().fold(
+        (0_u32, 0_u32, 0_u32),
+        |(red_sum, green_sum, blue_sum), (red, green, blue)| {
+            (
+                red_sum + u32::from(*red),
+                green_sum + u32::from(*green),
+                blue_sum + u32::from(*blue),
+            )
+        },
+    );
+
+    (
+        (red_sum / count) as u8,
+        (green_sum / count) as u8,
+        (blue_sum / count) as u8,
+    )
+}
+
+fn tint_rgb((red, green, blue): (u8, u8, u8), amount: f32) -> (u8, u8, u8) {
+    blend_rgb((red, green, blue), (255, 255, 255), amount)
+}
+
+fn shade_rgb((red, green, blue): (u8, u8, u8), amount: f32) -> (u8, u8, u8) {
+    blend_rgb((red, green, blue), (0, 0, 0), amount)
+}
+
+fn blend_rgb(
+    (red_a, green_a, blue_a): (u8, u8, u8),
+    (red_b, green_b, blue_b): (u8, u8, u8),
+    amount: f32,
+) -> (u8, u8, u8) {
+    let amount = amount.clamp(0.0, 1.0);
+    let blend = |left: u8, right: u8| -> u8 {
+        (f32::from(left) * (1.0 - amount) + f32::from(right) * amount).round() as u8
+    };
+
+    (
+        blend(red_a, red_b),
+        blend(green_a, green_b),
+        blend(blue_a, blue_b),
+    )
+}
+
+fn rgb_to_css((red, green, blue): (u8, u8, u8)) -> String {
+    format!("rgb({red} {green} {blue})")
+}
+
+fn xy_brightness_to_rgb(x: f32, y: f32, brightness: u8) -> Option<(u8, u8, u8)> {
+    if !(0.0..=1.0).contains(&x) || !(0.0..=1.0).contains(&y) || y <= f32::EPSILON {
+        return None;
+    }
+
+    let z = 1.0 - x - y;
+    if z < 0.0 {
+        return None;
+    }
+
+    let luminance = f32::from(brightness) / 254.0;
+    let x_xyz = (luminance / y) * x;
+    let z_xyz = (luminance / y) * z;
+
+    let mut red = x_xyz * 1.656492 - luminance * 0.354851 - z_xyz * 0.255038;
+    let mut green = -x_xyz * 0.707196 + luminance * 1.655397 + z_xyz * 0.036152;
+    let mut blue = x_xyz * 0.051713 - luminance * 0.121364 + z_xyz * 1.011_53;
+
+    red = red.max(0.0);
+    green = green.max(0.0);
+    blue = blue.max(0.0);
+
+    let max_channel = red.max(green).max(blue);
+    if max_channel > 1.0 {
+        red /= max_channel;
+        green /= max_channel;
+        blue /= max_channel;
+    }
+
+    Some((
+        gamma_correct(red),
+        gamma_correct(green),
+        gamma_correct(blue),
+    ))
+}
+
+fn gamma_correct(value: f32) -> u8 {
+    let corrected = if value <= 0.003_130_8 {
+        12.92 * value
+    } else {
+        1.055 * value.powf(1.0 / 2.4) - 0.055
+    };
+
+    (corrected.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+fn hue_sat_bri_to_rgb(hue: u16, saturation: u8, brightness: u8) -> (u8, u8, u8) {
+    let hue = f32::from(hue) * 360.0 / 65_535.0;
+    let saturation = f32::from(saturation) / 254.0;
+    let value = f32::from(brightness) / 254.0;
+
+    hsv_to_rgb_float(hue, saturation, value)
+}
+
+fn hsv_to_rgb_float(hue: f32, saturation: f32, value: f32) -> (u8, u8, u8) {
+    let hue = wrap_hue(hue);
+
+    if saturation <= f32::EPSILON {
+        let channel = (value * 255.0).round() as u8;
+        return (channel, channel, channel);
+    }
+
+    let chroma = value * saturation;
+    let hue_sector = hue / 60.0;
+    let secondary = chroma * (1.0 - ((hue_sector % 2.0) - 1.0).abs());
+    let match_value = value - chroma;
+
+    let (red, green, blue) = match hue_sector as u8 {
+        0 => (chroma, secondary, 0.0),
+        1 => (secondary, chroma, 0.0),
+        2 => (0.0, chroma, secondary),
+        3 => (0.0, secondary, chroma),
+        4 => (secondary, 0.0, chroma),
+        _ => (chroma, 0.0, secondary),
+    };
+
+    (
+        ((red + match_value) * 255.0).round() as u8,
+        ((green + match_value) * 255.0).round() as u8,
+        ((blue + match_value) * 255.0).round() as u8,
+    )
+}
+
+fn wrap_hue(hue: f32) -> f32 {
+    let wrapped = hue % 360.0;
+    if wrapped < 0.0 {
+        wrapped + 360.0
+    } else {
+        wrapped
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         compare_light_ids, ensure_success_only, extract_api_error, extract_created_scene_id,
-        extract_first_success,
+        extract_first_success, ScenePreview,
     };
-    use crate::hue::models::{CreateUserSuccessPayload, HueApiResponse};
+    use crate::hue::models::{CreateUserSuccessPayload, HueApiResponse, RawHueSceneLightState};
     use std::collections::HashMap;
 
     #[test]
@@ -422,5 +653,30 @@ mod tests {
 
         let scene_id = extract_created_scene_id(responses).unwrap();
         assert_eq!(scene_id, "desk-quiet-focus");
+    }
+
+    #[test]
+    fn derives_distinct_scene_previews_from_xy_lightstates() {
+        let warm = RawHueSceneLightState {
+            on: Some(true),
+            bri: Some(229),
+            xy: Some([0.485, 0.4543]),
+            sat: None,
+            hue: None,
+        };
+        let vivid = RawHueSceneLightState {
+            on: Some(true),
+            bri: Some(128),
+            xy: Some([0.2207, 0.083]),
+            sat: None,
+            hue: None,
+        };
+
+        let warm_preview = ScenePreview::from_lightstates([&warm]).unwrap();
+        let vivid_preview = ScenePreview::from_lightstates([&vivid]).unwrap();
+
+        assert_ne!(warm_preview.main, vivid_preview.main);
+        assert!(warm_preview.main.starts_with("rgb("));
+        assert!(vivid_preview.main.starts_with("rgb("));
     }
 }

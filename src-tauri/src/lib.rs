@@ -1,6 +1,7 @@
 mod app_state;
 mod commands;
 mod hue;
+mod theme;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -21,6 +22,9 @@ pub fn run() {
             commands::load_persisted_room_order,
             commands::save_persisted_room_order,
             commands::clear_persisted_room_order,
+            commands::quit_app,
+            commands::load_theme_preference,
+            commands::save_theme_preference,
         ]);
 
     if let Err(error) = builder.run(tauri::generate_context!()) {

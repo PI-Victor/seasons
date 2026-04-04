@@ -2,15 +2,18 @@ use crate::app_state::{
     clear_bridge_connection as state_clear_bridge_connection,
     clear_room_order as state_clear_room_order,
     load_bridge_connection as state_load_bridge_connection,
-    load_room_order as state_load_room_order,
+    load_room_order as state_load_room_order, load_theme_preference as state_load_theme_preference,
     save_bridge_connection as state_save_bridge_connection,
-    save_room_order as state_save_room_order, SaveRoomOrderRequest,
+    save_room_order as state_save_room_order, save_theme_preference as state_save_theme_preference,
+    SaveRoomOrderRequest,
 };
 use crate::hue::{
     ActivateSceneRequest, BridgeConnection, CreateSceneRequest, CreateUserRequest,
     DiscoveredBridge, Group, HueBridgeClient, HueBridgeConfig, Light, RegisteredApp, Scene,
     SetLightStateRequest,
 };
+use crate::theme::ThemePreference;
+use tauri::AppHandle;
 
 #[tauri::command]
 pub async fn discover_hue_bridges() -> Result<Vec<DiscoveredBridge>, String> {
@@ -172,4 +175,19 @@ pub fn save_persisted_room_order(request: SaveRoomOrderRequest) -> Result<(), St
 #[tauri::command]
 pub fn clear_persisted_room_order(connection: BridgeConnection) -> Result<(), String> {
     state_clear_room_order(&connection)
+}
+
+#[tauri::command]
+pub fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
+#[tauri::command]
+pub fn load_theme_preference() -> Result<ThemePreference, String> {
+    state_load_theme_preference()
+}
+
+#[tauri::command]
+pub fn save_theme_preference(preference: ThemePreference) -> Result<(), String> {
+    state_save_theme_preference(&preference)
 }

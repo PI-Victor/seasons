@@ -70,6 +70,9 @@ pub struct Scene {
     pub group_id: Option<String>,
     pub light_count: usize,
     pub scene_type: Option<String>,
+    pub preview_color_soft: Option<String>,
+    pub preview_color_main: Option<String>,
+    pub preview_color_deep: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

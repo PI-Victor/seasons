@@ -84,6 +84,9 @@ pub struct Scene {
     pub group_id: Option<String>,
     pub light_count: usize,
     pub scene_type: Option<String>,
+    pub preview_color_soft: Option<String>,
+    pub preview_color_main: Option<String>,
+    pub preview_color_deep: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -200,8 +203,27 @@ impl From<(String, RawHueScene)> for Scene {
             group_id: raw.group,
             light_count: raw.lights.len(),
             scene_type: raw.scene_type,
+            preview_color_soft: None,
+            preview_color_main: None,
+            preview_color_deep: None,
         }
     }
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct RawHueSceneDetail {
+    #[serde(default)]
+    pub lightstates: HashMap<String, RawHueSceneLightState>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct RawHueSceneLightState {
+    pub on: Option<bool>,
+    pub bri: Option<u8>,
+    #[serde(default)]
+    pub xy: Option<[f32; 2]>,
+    pub sat: Option<u8>,
+    pub hue: Option<u16>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -259,6 +281,7 @@ impl HueLightStatePayload {
 pub(crate) type RawLightsResponse = BTreeMap<String, RawHueLight>;
 pub(crate) type RawGroupsResponse = BTreeMap<String, RawHueGroup>;
 pub(crate) type RawScenesResponse = BTreeMap<String, RawHueScene>;
+pub(crate) type RawSceneDetailResponse = RawHueSceneDetail;
 pub(crate) type RawStateChangeSuccess = HashMap<String, Value>;
 pub(crate) type RawSceneCreateSuccess = HashMap<String, String>;
 

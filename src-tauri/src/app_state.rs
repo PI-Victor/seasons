@@ -1,4 +1,5 @@
 use crate::hue::BridgeConnection;
+use crate::theme::ThemePreference;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -16,11 +17,14 @@ pub struct SaveRoomOrderRequest {
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
 struct AppConfigFile {
     last_connection: Option<BridgeConnection>,
+    theme_preference: ThemePreference,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
 struct AppDataFile {
     room_orders: BTreeMap<String, Vec<String>>,
 }
@@ -39,6 +43,17 @@ pub fn save_bridge_connection(connection: &BridgeConnection) -> Result<(), Strin
 pub fn clear_bridge_connection() -> Result<(), String> {
     let mut config = read_json::<AppConfigFile>(&config_file_path()?)?;
     config.last_connection = None;
+    write_json(&config_file_path()?, &config)
+}
+
+pub fn load_theme_preference() -> Result<ThemePreference, String> {
+    let config = read_json::<AppConfigFile>(&config_file_path()?)?;
+    Ok(config.theme_preference)
+}
+
+pub fn save_theme_preference(preference: &ThemePreference) -> Result<(), String> {
+    let mut config = read_json::<AppConfigFile>(&config_file_path()?)?;
+    config.theme_preference = preference.clone();
     write_json(&config_file_path()?, &config)
 }
 
@@ -155,6 +170,7 @@ fn room_order_key(connection: &BridgeConnection) -> String {
 mod tests {
     use super::{room_order_key, AppConfigFile, AppDataFile};
     use crate::hue::BridgeConnection;
+    use crate::theme::{ThemeMode, ThemePalette, ThemePreference};
 
     #[test]
     fn room_order_key_uses_bridge_and_username() {
@@ -172,6 +188,13 @@ mod tests {
         let data = AppDataFile::default();
 
         assert!(config.last_connection.is_none());
+        assert_eq!(
+            config.theme_preference,
+            ThemePreference {
+                palette: ThemePalette::RosePine,
+                mode: ThemeMode::System,
+            }
+        );
         assert!(data.room_orders.is_empty());
     }
 }
