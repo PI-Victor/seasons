@@ -1484,6 +1484,35 @@ input {
   gap: 14px;
 }
 
+.automation-browser,
+.automation-editor-page {
+  display: grid;
+  gap: 16px;
+}
+
+.automation-page-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.automation-page-copy {
+  min-width: 0;
+}
+
+.automation-page-copy h2 {
+  margin: 0;
+}
+
+.automation-page-back {
+  justify-self: start;
+}
+
+.automation-page-save {
+  justify-self: end;
+}
+
 .automation-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -1503,6 +1532,15 @@ input {
 
 .automation-card-button {
   cursor: pointer;
+}
+
+.automation-card-footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.automation-open-button {
+  pointer-events: none;
 }
 
 .automation-card-button.is-selected {
@@ -1559,6 +1597,335 @@ input {
 .automation-detail-block {
   display: grid;
   gap: 8px;
+}
+
+.automation-editor-grid {
+  align-items: end;
+}
+
+.automation-toggle-field {
+  align-content: start;
+}
+
+.automation-toggle-button {
+  justify-self: start;
+}
+
+.automation-editor-actions {
+  margin-top: 2px;
+}
+
+.automation-time-picker {
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  padding: 8px 0 4px;
+}
+
+.automation-flip-clock {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.automation-flip-card {
+  position: relative;
+  display: grid;
+  width: min(34vw, 148px);
+  min-width: 124px;
+  border-radius: 18px;
+  overflow: hidden;
+  background: color-mix(in srgb, #fff 94%, #f4ecdf);
+  color: #2f2823;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 18px 28px rgba(0, 0, 0, 0.18);
+}
+
+.automation-flip-card::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: rgba(47, 40, 35, 0.18);
+  z-index: 2;
+}
+
+.automation-flip-card.is-active {
+  box-shadow:
+    inset 0 0 0 2px color-mix(in srgb, var(--amber) 52%, transparent),
+    0 18px 30px rgba(0, 0, 0, 0.22);
+}
+
+.automation-flip-card-top,
+.automation-flip-card-bottom {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 4.15rem;
+  padding: 0.45rem 0.7rem;
+  font-size: clamp(2.5rem, 8vw, 4rem);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.automation-flip-card-top {
+  align-items: end;
+  padding-bottom: 0.1rem;
+  background: linear-gradient(180deg, #fff, #f5ede1);
+}
+
+.automation-flip-card-bottom {
+  align-items: start;
+  padding-top: 0.1rem;
+  background: linear-gradient(180deg, #f1e5d7, #fff);
+}
+
+.automation-flip-separator {
+  color: var(--text-soft);
+  font-size: 2.35rem;
+  font-weight: 700;
+}
+
+.automation-time-display-copy {
+  margin: -4px 0 0;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+}
+
+.automation-time-card-section {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+.automation-time-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(62px, 1fr));
+  gap: 8px;
+}
+
+.automation-time-card {
+  padding: 0.7rem 0.5rem;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--ghost-bg) 88%, var(--bg-card));
+  color: var(--text-soft);
+  font-weight: 700;
+}
+
+.automation-time-card.is-selected {
+  background: color-mix(in srgb, var(--blue) 78%, var(--amber));
+  color: #fff;
+}
+
+.automation-time-trigger {
+  min-width: 7rem;
+}
+
+.automation-config-section {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.automation-config-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 10px 0 4px;
+}
+
+.automation-config-section-body {
+  display: grid;
+}
+
+.automation-config-section-title {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.automation-config-section + .automation-config-section {
+  margin-top: 8px;
+}
+
+.automation-config-input {
+  display: grid;
+  gap: 8px;
+}
+
+.automation-config-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 0;
+  border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.automation-config-section-body > .automation-config-row:first-child,
+.automation-config-section > .automation-config-row:first-child {
+  border-top: 0;
+}
+
+.automation-config-row-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.automation-config-row-label {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.automation-config-row-subcopy {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+}
+
+.automation-config-row-control {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+  min-width: min(220px, 100%);
+}
+
+.automation-config-row-days {
+  align-items: start;
+}
+
+.automation-config-row-switch {
+  align-items: center;
+}
+
+.automation-config-inline-input,
+.automation-config-kind-select {
+  min-width: 9rem;
+}
+
+.automation-config-inline-input {
+  width: 100%;
+}
+
+.automation-config-inline-toggle {
+  justify-self: end;
+}
+
+.automation-config-switch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+.automation-config-switch-track {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 48px;
+  height: 28px;
+  padding: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ghost-bg) 92%, var(--bg-card));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 80%, transparent);
+  transition: background 160ms ease, box-shadow 160ms ease;
+}
+
+.automation-config-switch.is-on .automation-config-switch-track,
+.automation-config-switch.is-on {
+  background: transparent;
+}
+
+.automation-config-switch.is-on .automation-config-switch-track {
+  background: color-mix(in srgb, var(--blue) 76%, var(--amber));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 30%, transparent);
+}
+
+.automation-config-switch-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
+  transform: translateX(0);
+  transition: transform 160ms ease;
+}
+
+.automation-config-switch.is-on .automation-config-switch-thumb {
+  transform: translateX(20px);
+}
+
+.automation-config-switch:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.automation-config-weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: end;
+  gap: 8px;
+  max-width: 17rem;
+}
+
+.automation-config-day {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  background: color-mix(in srgb, var(--ghost-bg) 88%, var(--bg-card));
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.automation-config-day.is-selected {
+  border-color: color-mix(in srgb, var(--amber) 34%, var(--line));
+  background: color-mix(in srgb, var(--blue) 78%, var(--amber));
+  color: #fff;
+}
+
+.automation-config-day:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.automation-config-bool {
+  justify-self: start;
+}
+
+.automation-config-null {
+  margin: 0;
+}
+
+.automation-advanced {
+  display: grid;
+  gap: 10px;
+}
+
+.automation-advanced-summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.automation-advanced-summary::-webkit-details-marker {
+  display: none;
 }
 
 .automation-json {

@@ -2,9 +2,10 @@ use crate::desktop;
 use crate::hue::{
     self, curated_room_scenes, preset_light_state, ActivateSceneRequest, AudioSyncColorPalette,
     AudioSyncSpeedMode, AudioSyncStartRequest, AudioSyncUpdateRequest, Automation,
-    BridgeConnection, CreateSceneRequest, CreateUserRequest, DeleteSceneRequest, EntertainmentArea,
-    Group, GroupKind, Light, LightStateUpdate, PipeWireOutputTarget, Scene, Sensor,
-    SetAutomationEnabledRequest, SetLightStateRequest,
+    AutomationConfigValue, BridgeConnection, CreateSceneRequest, CreateUserRequest,
+    DeleteSceneRequest, EntertainmentArea, Group, GroupKind, Light, LightStateUpdate,
+    PipeWireOutputTarget, Scene, Sensor, SetAutomationEnabledRequest, SetLightStateRequest,
+    UpdateAutomationRequest,
 };
 use crate::storage::{self, AudioSyncPreferences};
 use crate::theme::{apply_theme_preference, ThemeMode, ThemePalette, ThemePreference};
@@ -1395,6 +1396,82 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    let update_automation = Callback::new({
+        move |(automation_id, name, enabled, configuration): (
+            String,
+            String,
+            Option<bool>,
+            Option<AutomationConfigValue>,
+        )| {
+            let Some(connection) = active_connection.get_untracked() else {
+                set_notice.set(Some(UiNotice::warning(
+                    "No active bridge connection",
+                    "Connect to a bridge before changing automations.",
+                )));
+                return;
+            };
+
+            let trimmed_name = name.trim().to_string();
+            if trimmed_name.is_empty() {
+                set_notice.set(Some(UiNotice::warning(
+                    "Automation name required",
+                    "Enter a name before saving automation changes.",
+                )));
+                return;
+            }
+
+            let previous = automations
+                .get_untracked()
+                .into_iter()
+                .find(|automation| automation.id == automation_id);
+            let automation_name = previous
+                .as_ref()
+                .map(|automation| automation.name.clone())
+                .unwrap_or_else(|| "Automation".to_string());
+
+            set_pending_automation_ids.update(|pending| {
+                pending.insert(automation_id.clone());
+            });
+
+            spawn_local(async move {
+                let request = UpdateAutomationRequest {
+                    connection,
+                    automation_id: automation_id.clone(),
+                    name: trimmed_name.clone(),
+                    enabled,
+                    configuration,
+                };
+
+                match hue::update_hue_automation(request).await {
+                    Ok(()) => {
+                        set_automations.update(|items| {
+                            if let Some(automation) = items
+                                .iter_mut()
+                                .find(|automation| automation.id == automation_id)
+                            {
+                                automation.name = trimmed_name.clone();
+                                if enabled.is_some() {
+                                    automation.enabled = enabled;
+                                }
+                            }
+                        });
+                        set_notice.set(Some(UiNotice::success(
+                            "Automation updated",
+                            format!("{automation_name} was saved."),
+                        )));
+                    }
+                    Err(error) => {
+                        set_notice.set(Some(UiNotice::error("Automation update failed", error)));
+                    }
+                }
+
+                set_pending_automation_ids.update(|pending| {
+                    pending.remove(&automation_id);
+                });
+            });
+        }
+    });
+
     let toggle_light = Callback::new({
         move |light_id: String| {
             let connection = match active_connection.get_untracked() {
@@ -2005,6 +2082,7 @@ pub fn App() -> impl IntoView {
                                 automations=automations
                                 pending_automation_ids=pending_automation_ids
                                 on_toggle_automation=toggle_automation
+                                on_update_automation=update_automation
                             />
                         </section>
                     }.into_any()
