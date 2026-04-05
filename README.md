@@ -13,6 +13,83 @@ The project is primarily aimed at Linux, especially for features that are usuall
 - Hue automations with dedicated editing flows
 - Entertainment audio sync over PipeWire on Linux
 
+## Overview
+
+Seasons is built around five top-level pages:
+
+- `Rooms` for the day-to-day room view and scene control
+- `Devices` for all controllable hardware grouped by type
+- `Automations` for Hue behavior instances and schedules
+- `Settings` for bridge management and theme selection
+- `Audio sync` as a collapsible control surface on the main page
+
+![Seasons main page](assets/Seasons-main.png)
+
+## Walkthrough
+
+### Rooms
+
+The main page is room-first. Each room stays compact until you open it, then shows:
+
+- current on/off state
+- room brightness
+- scene chips with bridge-derived colors
+- room lights and per-device controls
+
+The room header is meant to be the fast control surface: you can toggle the room, set brightness, then open it only when you need scenes or individual devices.
+
+![Expanded room view](assets/Seasons-lights.png)
+
+### Devices
+
+The `Devices` page pulls everything into one place and groups it by function instead of room. That makes it easier to find hardware that does not belong to the normal room-light flow, such as plugs, switches, and sensors.
+
+Current grouping is:
+
+- `Lights`
+- `Plugs`
+- `Switches`
+- `Sensors`
+
+![Devices page](assets/Seasons-devices.png)
+
+### Automations
+
+The `Automations` page lists bridge automations and lets you open them into a dedicated editor flow. From there you can inspect the bridge payload, edit supported configuration fields, and toggle the automation without leaving the app.
+
+The app also surfaces the bridge-reported automation type, so the UI reflects what Hue actually exposes instead of inventing its own categories.
+
+![Automations page](assets/Seasons-automations.png)
+
+### Audio sync
+
+Audio sync uses Hue Entertainment, not the normal REST light path. The sync controls live on the main page so they are close to the rooms they affect.
+
+To use it:
+
+1. Create a Hue Entertainment area in the official Hue app.
+2. Pick that entertainment area in Seasons.
+3. Pick the PipeWire output to capture.
+4. Choose sync speed and color palette.
+5. Start sync.
+
+`Current room` uses the active room palette as the sync color base. Other palettes are available when you want a fixed sync look instead.
+
+![Audio sync panel](assets/Seasons-sync.png)
+
+### Settings
+
+`Settings` is kept narrow on purpose. It covers:
+
+- theme family and light/dark/system mode
+- saved bridge management
+- reconnecting with an existing username
+- pairing a new local bridge app user
+
+The app persists its state in platform-appropriate config/data locations instead of browser local storage.
+
+![Settings page](assets/Seasons-settings.png)
+
 ## Linux dependencies
 
 You need both the normal Tauri/WebKitGTK build stack and the PipeWire development package for audio sync.
