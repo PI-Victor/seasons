@@ -23,7 +23,7 @@ Seasons is built around five top-level pages:
 - `Settings` for bridge management and theme selection
 - `Audio sync` as a collapsible control surface on the main page
 
-![Seasons main page](assets/Seasons-main.png)
+<img src="assets/Seasons-main.png" alt="Seasons main page" width="70%" />
 
 ## Walkthrough
 
@@ -38,7 +38,7 @@ The main page is room-first. Each room stays compact until you open it, then sho
 
 The room header is meant to be the fast control surface: you can toggle the room, set brightness, then open it only when you need scenes or individual devices.
 
-![Expanded room view](assets/Seasons-lights.png)
+<img src="assets/Seasons-lights.png" alt="Expanded room view" width="70%" />
 
 ### Devices
 
@@ -51,7 +51,7 @@ Current grouping is:
 - `Switches`
 - `Sensors`
 
-![Devices page](assets/Seasons-devices.png)
+<img src="assets/Seasons-devices.png" alt="Devices page" width="70%" />
 
 ### Automations
 
@@ -59,7 +59,7 @@ The `Automations` page lists bridge automations and lets you open them into a de
 
 The app also surfaces the bridge-reported automation type, so the UI reflects what Hue actually exposes instead of inventing its own categories.
 
-![Automations page](assets/Seasons-automations.png)
+<img src="assets/Seasons-automations.png" alt="Automations page" width="70%" />
 
 ### Audio sync
 
@@ -75,7 +75,7 @@ To use it:
 
 `Current room` uses the active room palette as the sync color base. Other palettes are available when you want a fixed sync look instead.
 
-![Audio sync panel](assets/Seasons-sync.png)
+<img src="assets/Seasons-sync.png" alt="Audio sync panel" width="70%" />
 
 ### Settings
 
@@ -88,7 +88,7 @@ To use it:
 
 The app persists its state in platform-appropriate config/data locations instead of browser local storage.
 
-![Settings page](assets/Seasons-settings.png)
+<img src="assets/Seasons-settings.png" alt="Settings page" width="70%" />
 
 ## Linux dependencies
 
