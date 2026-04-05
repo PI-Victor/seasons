@@ -10,7 +10,7 @@ The project is primarily aimed at Linux, especially for features that are usuall
 - Room-first Hue control UI
 - Scene browsing, activation, creation, and deletion
 - Device controls grouped by room or by type
-- Hue automations with detail inspection
+- Hue automations with dedicated editing flows
 - Entertainment audio sync over PipeWire on Linux
 
 ## Linux dependencies
@@ -69,7 +69,7 @@ For macOS desktop development, install the Xcode Command Line Tools:
 xcode-select --install
 ```
 
-Audio sync on macOS uses ScreenCaptureKit and also relies on the Swift runtime from the selected Apple developer toolchain. In practice, that means:
+Audio sync on macOS uses ScreenCaptureKit and links against the system Swift runtime. In practice, that means:
 
 - install Xcode Command Line Tools at minimum
 - if you use a full Xcode install, launch it once so setup completes
@@ -111,5 +111,5 @@ cargo tauri build
 - Entertainment audio sync requires a Hue Entertainment area created in the official Hue app.
 - Entertainment audio sync on Linux currently uses PipeWire output capture.
 - Entertainment audio sync on macOS uses ScreenCaptureKit system audio capture and requires Screen Recording permission.
-- If macOS launch fails with `libswift_Concurrency.dylib` missing, the selected Apple developer toolchain is missing the Swift runtime dylibs needed by the ScreenCaptureKit bridge.
+- The macOS binary now points `@rpath` at `/usr/lib/swift` to avoid loading duplicate Swift runtimes from Xcode toolchains.
 - The saved bridge session and app state are stored in XDG config/data locations, not in browser local storage.
