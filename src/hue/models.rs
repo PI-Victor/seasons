@@ -65,6 +65,7 @@ pub struct Automation {
     pub id: String,
     pub name: String,
     pub enabled: Option<bool>,
+    pub automation_type: Option<String>,
     pub script_id: Option<String>,
 }
 
@@ -92,8 +93,10 @@ pub struct AutomationDetail {
     pub id: String,
     pub name: String,
     pub enabled: Option<bool>,
+    pub automation_type: Option<String>,
     pub script_id: Option<String>,
     pub script_name: Option<String>,
+    pub script_type: Option<String>,
     #[serde(default)]
     pub configuration: Option<AutomationConfigValue>,
     pub instance_json: String,

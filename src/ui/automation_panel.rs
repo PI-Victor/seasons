@@ -299,6 +299,11 @@ pub fn AutomationPanel(
                         .and_then(|detail| detail.script_name.clone())
                         .or_else(|| automation.script_id.clone())
                         .unwrap_or_else(|| "Hue automation".to_string());
+                    let automation_type = detail
+                        .as_ref()
+                        .and_then(|detail| detail.automation_type.clone())
+                        .or_else(|| automation.automation_type.clone());
+                    let script_type = detail.as_ref().and_then(|detail| detail.script_type.clone());
                     let original_name = detail
                         .as_ref()
                         .map(|detail| detail.name.clone())
@@ -366,6 +371,25 @@ pub fn AutomationPanel(
                                             <h3>{move || draft_name.get()}</h3>
                                         </div>
                                     </div>
+                                </div>
+
+                                <div class="automation-detail-meta">
+                                    {automation_type
+                                        .clone()
+                                        .map(|automation_type| view! {
+                                            <span class="light-meta-chip">{automation_type}</span>
+                                        })}
+                                    {script_type
+                                        .clone()
+                                        .map(|script_type| view! {
+                                            <span class="light-meta-chip">{script_type}</span>
+                                        })}
+                                    {automation
+                                        .script_id
+                                        .clone()
+                                        .map(|script_id| view! {
+                                            <span class="light-meta-chip" title=script_id.clone()>{script_id.clone()}</span>
+                                        })}
                                 </div>
 
                                 {move || {
@@ -501,6 +525,7 @@ pub fn AutomationPanel(
                                         let automation_id_for_toggle = automation_id.clone();
                                         let enabled = automation.enabled.unwrap_or(false);
                                         let icon_class = automation_icon_class(&automation);
+                                        let automation_type = automation.automation_type.clone();
                                         let subtitle = automation
                                             .script_id
                                             .clone()
@@ -549,6 +574,13 @@ pub fn AutomationPanel(
                                                         </span>
                                                     </button>
                                                 </div>
+                                                {automation_type
+                                                    .clone()
+                                                    .map(|automation_type| view! {
+                                                        <div class="automation-detail-meta">
+                                                            <span class="light-meta-chip">{automation_type}</span>
+                                                        </div>
+                                                    })}
                                                 <div class="automation-card-footer">
                                                     <button class="secondary-button automation-open-button">
                                                         "Open editor"

@@ -67,6 +67,7 @@ pub struct Automation {
     pub id: String,
     pub name: String,
     pub enabled: Option<bool>,
+    pub automation_type: Option<String>,
     pub script_id: Option<String>,
 }
 
@@ -94,8 +95,10 @@ pub struct AutomationDetail {
     pub id: String,
     pub name: String,
     pub enabled: Option<bool>,
+    pub automation_type: Option<String>,
     pub script_id: Option<String>,
     pub script_name: Option<String>,
+    pub script_type: Option<String>,
     #[serde(default)]
     pub configuration: Option<AutomationConfigValue>,
     pub instance_json: String,
@@ -568,6 +571,8 @@ pub(crate) struct RawEntertainmentPosition {
 #[derive(Debug, Deserialize)]
 pub(crate) struct RawAutomation {
     pub id: String,
+    #[serde(default, rename = "type")]
+    pub automation_type: Option<String>,
     pub metadata: RawAutomationMetadata,
     #[serde(default)]
     pub enabled: Option<bool>,
@@ -591,6 +596,7 @@ impl From<RawAutomation> for Automation {
             id: raw.id,
             name: raw.metadata.name,
             enabled: raw.enabled,
+            automation_type: raw.automation_type,
             script_id: raw.script_id.map(|script| script.rid),
         }
     }
@@ -847,6 +853,7 @@ mod tests {
             "data": [
                 {
                     "id": "automation-1",
+                    "type": "behavior_instance",
                     "metadata": { "name": "Morning lights" },
                     "enabled": true,
                     "script_id": { "rid": "script-1", "rtype": "behavior_script" }
@@ -865,6 +872,10 @@ mod tests {
         assert_eq!(automations.len(), 2);
         assert_eq!(automations[0].name, "Morning lights");
         assert_eq!(automations[0].enabled, Some(true));
+        assert_eq!(
+            automations[0].automation_type.as_deref(),
+            Some("behavior_instance")
+        );
         assert_eq!(automations[0].script_id.as_deref(), Some("script-1"));
         assert_eq!(automations[1].enabled, None);
     }

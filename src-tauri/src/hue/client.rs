@@ -255,31 +255,38 @@ impl HueBridgeClient {
             )
         })?;
 
-        let (script_name, script_json) = if let Some(script_id) = automation.script_id.as_deref() {
-            match self
-                .fetch_clip_v2_resource("behavior_script", script_id)
-                .await
-            {
-                Ok(script_value) => (
-                    script_value
-                        .get("metadata")
-                        .and_then(|metadata| metadata.get("name"))
-                        .and_then(Value::as_str)
-                        .map(ToOwned::to_owned),
-                    serde_json::to_string_pretty(&script_value).ok(),
-                ),
-                Err(_) => (None, None),
-            }
-        } else {
-            (None, None)
-        };
+        let (script_name, script_type, script_json) =
+            if let Some(script_id) = automation.script_id.as_deref() {
+                match self
+                    .fetch_clip_v2_resource("behavior_script", script_id)
+                    .await
+                {
+                    Ok(script_value) => (
+                        script_value
+                            .get("metadata")
+                            .and_then(|metadata| metadata.get("name"))
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned),
+                        script_value
+                            .get("type")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned),
+                        serde_json::to_string_pretty(&script_value).ok(),
+                    ),
+                    Err(_) => (None, None, None),
+                }
+            } else {
+                (None, None, None)
+            };
 
         Ok(crate::hue::models::AutomationDetail {
             id: automation.id,
             name: automation.name,
             enabled: automation.enabled,
+            automation_type: automation.automation_type,
             script_id: automation.script_id,
             script_name,
+            script_type,
             configuration: instance_value
                 .get("configuration")
                 .map(automation_config_from_json_value),
@@ -952,6 +959,10 @@ fn automation_from_value(value: &Value) -> Option<Automation> {
         .to_string();
 
     let enabled = value.get("enabled").and_then(Value::as_bool);
+    let automation_type = value
+        .get("type")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned);
     let script_id = value
         .get("script_id")
         .and_then(|script| {
@@ -966,6 +977,7 @@ fn automation_from_value(value: &Value) -> Option<Automation> {
         id: id.to_string(),
         name,
         enabled,
+        automation_type,
         script_id,
     })
 }
