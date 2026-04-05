@@ -209,6 +209,31 @@ WEBKIT_DISABLE_DMABUF_RENDERER=1 cargo tauri dev
 cargo tauri build
 ```
 
+## Install from a release
+
+Linux releases are published as:
+
+- `seasons_0.1.0-rc1_amd64.deb`
+- `seasons-0.1.0-rc1-1.x86_64.rpm`
+
+### Debian / Ubuntu
+
+Download the `.deb`, then install it with:
+
+```bash
+sudo apt install ./seasons_0.1.0-rc1_amd64.deb
+```
+
+### Fedora / RHEL / other RPM-based systems
+
+Download the `.rpm`, then install it with:
+
+```bash
+sudo dnf install ./seasons-0.1.0-rc1-1.x86_64.rpm
+```
+
+If your distro uses another RPM frontend, the equivalent local-install command works too.
+
 ## Notes
 
 - Entertainment audio sync requires a Hue Entertainment area created in the official Hue app.
