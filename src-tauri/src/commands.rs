@@ -15,7 +15,7 @@ use crate::hue::{
     Automation, AutomationDetail, BridgeConnection, CreateSceneRequest, CreateUserRequest,
     DeleteSceneRequest, DiscoveredBridge, EntertainmentArea, Group, HueBridgeClient,
     HueBridgeConfig, Light, PipeWireOutputTarget, RegisteredApp, Scene, Sensor,
-    SetAutomationEnabledRequest, SetLightStateRequest,
+    SetAutomationEnabledRequest, SetLightStateRequest, UpdateAutomationRequest,
 };
 use crate::theme::ThemePreference;
 use tauri::{AppHandle, State};
@@ -272,6 +272,26 @@ pub async fn set_hue_automation_enabled(
 
     client
         .set_automation_enabled(&automation_id, enabled)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn update_hue_automation(request: UpdateAutomationRequest) -> Result<(), String> {
+    let UpdateAutomationRequest {
+        connection,
+        automation_id,
+        name,
+        enabled,
+        configuration,
+    } = request;
+
+    let config = HueBridgeConfig::authenticated(connection.bridge_ip, connection.username)
+        .map_err(|error| error.to_string())?;
+    let client = HueBridgeClient::new(config).map_err(|error| error.to_string())?;
+
+    client
+        .update_automation(&automation_id, &name, enabled, configuration.as_ref())
         .await
         .map_err(|error| error.to_string())
 }

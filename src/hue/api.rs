@@ -3,6 +3,7 @@ use crate::hue::models::{
     Automation, AutomationDetail, BridgeConnection, CreateSceneRequest, CreateUserRequest,
     DeleteSceneRequest, DiscoveredBridge, EntertainmentArea, Group, Light, PipeWireOutputTarget,
     RegisteredApp, Scene, Sensor, SetAutomationEnabledRequest, SetLightStateRequest,
+    UpdateAutomationRequest,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -101,6 +102,10 @@ pub async fn set_hue_automation_enabled(
     request: SetAutomationEnabledRequest,
 ) -> Result<(), String> {
     invoke_with_named_args("set_hue_automation_enabled", &[("request", &request)]).await
+}
+
+pub async fn update_hue_automation(request: UpdateAutomationRequest) -> Result<(), String> {
+    invoke_with_named_args("update_hue_automation", &[("request", &request)]).await
 }
 
 pub async fn start_hue_audio_sync(

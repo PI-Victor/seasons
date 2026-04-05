@@ -70,11 +70,32 @@ pub struct Automation {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct AutomationConfigEntry {
+    pub key: String,
+    pub value: AutomationConfigValue,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", tag = "kind", content = "value")]
+pub enum AutomationConfigValue {
+    Object(Vec<AutomationConfigEntry>),
+    Array(Vec<AutomationConfigValue>),
+    String(String),
+    Number(String),
+    Bool(bool),
+    Null,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct AutomationDetail {
     pub id: String,
     pub name: String,
     pub enabled: Option<bool>,
     pub script_id: Option<String>,
+    pub script_name: Option<String>,
+    #[serde(default)]
+    pub configuration: Option<AutomationConfigValue>,
     pub instance_json: String,
     pub script_json: Option<String>,
 }
@@ -85,6 +106,18 @@ pub struct SetAutomationEnabledRequest {
     pub connection: BridgeConnection,
     pub automation_id: String,
     pub enabled: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateAutomationRequest {
+    pub connection: BridgeConnection,
+    pub automation_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub configuration: Option<AutomationConfigValue>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

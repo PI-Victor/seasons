@@ -26,6 +26,7 @@ pub fn run() {
             commands::list_pipewire_output_targets,
             commands::set_hue_light_state,
             commands::set_hue_automation_enabled,
+            commands::update_hue_automation,
             commands::activate_hue_scene,
             commands::create_hue_scene,
             commands::delete_hue_scene,

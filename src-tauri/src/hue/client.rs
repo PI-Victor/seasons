@@ -1,10 +1,11 @@
 use crate::hue::config::HueBridgeConfig;
 use crate::hue::error::HueError;
 use crate::hue::models::{
-    Automation, ClipV2ListResponse, CreateUserSuccessPayload, DiscoveredBridge, EntertainmentArea,
-    Group, HueApiResponse, Light, LightStateUpdate, RawEntertainmentArea, RawGroupsResponse,
-    RawLightsResponse, RawSceneCreateSuccess, RawSceneDetailResponse, RawScenesResponse,
-    RawSensorsResponse, RawStateChangeSuccess, RegisteredApp, Scene, Sensor,
+    Automation, AutomationConfigEntry, AutomationConfigValue, ClipV2ListResponse,
+    CreateUserSuccessPayload, DiscoveredBridge, EntertainmentArea, Group, HueApiResponse, Light,
+    LightStateUpdate, RawEntertainmentArea, RawGroupsResponse, RawLightsResponse,
+    RawSceneCreateSuccess, RawSceneDetailResponse, RawScenesResponse, RawSensorsResponse,
+    RawStateChangeSuccess, RegisteredApp, Scene, Sensor,
 };
 use reqwest::Client;
 use serde_json::Value;
@@ -187,6 +188,52 @@ impl HueBridgeClient {
         ensure_success_body(&body, true, true)
     }
 
+    pub async fn update_automation(
+        &self,
+        automation_id: &str,
+        name: &str,
+        enabled: Option<bool>,
+        configuration: Option<&AutomationConfigValue>,
+    ) -> Result<(), HueError> {
+        let automation_id = automation_id.trim();
+        if automation_id.is_empty() {
+            return Err(HueError::InvalidConfig("automation ID is required"));
+        }
+
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(HueError::InvalidConfig("automation name is required"));
+        }
+
+        let endpoint = format!(
+            "{}/resource/behavior_instance/{automation_id}",
+            self.config.clip_v2_base_url()
+        );
+
+        let mut payload = serde_json::json!({
+            "metadata": { "name": name }
+        });
+        if let Some(enabled) = enabled {
+            payload["enabled"] = serde_json::json!(enabled);
+        }
+        if let Some(configuration) = configuration {
+            payload["configuration"] = automation_config_to_json_value(configuration)?;
+        }
+
+        let body = self
+            .http
+            .put(endpoint)
+            .header(HUE_APPLICATION_KEY_HEADER, self.config.application_key()?)
+            .json(&payload)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+
+        ensure_success_body(&body, true, true)
+    }
+
     pub async fn get_automation_detail(
         &self,
         automation_id: &str,
@@ -208,16 +255,23 @@ impl HueBridgeClient {
             )
         })?;
 
-        let script_json = if let Some(script_id) = automation.script_id.as_deref() {
+        let (script_name, script_json) = if let Some(script_id) = automation.script_id.as_deref() {
             match self
                 .fetch_clip_v2_resource("behavior_script", script_id)
                 .await
             {
-                Ok(script_value) => serde_json::to_string_pretty(&script_value).ok(),
-                Err(_) => None,
+                Ok(script_value) => (
+                    script_value
+                        .get("metadata")
+                        .and_then(|metadata| metadata.get("name"))
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned),
+                    serde_json::to_string_pretty(&script_value).ok(),
+                ),
+                Err(_) => (None, None),
             }
         } else {
-            None
+            (None, None)
         };
 
         Ok(crate::hue::models::AutomationDetail {
@@ -225,6 +279,10 @@ impl HueBridgeClient {
             name: automation.name,
             enabled: automation.enabled,
             script_id: automation.script_id,
+            script_name,
+            configuration: instance_value
+                .get("configuration")
+                .map(automation_config_from_json_value),
             instance_json,
             script_json,
         })
@@ -910,6 +968,79 @@ fn automation_from_value(value: &Value) -> Option<Automation> {
         enabled,
         script_id,
     })
+}
+
+fn automation_config_from_json_value(value: &Value) -> AutomationConfigValue {
+    match value {
+        Value::Object(entries) => AutomationConfigValue::Object(
+            entries
+                .iter()
+                .map(|(key, value)| AutomationConfigEntry {
+                    key: key.clone(),
+                    value: automation_config_from_json_value(value),
+                })
+                .collect(),
+        ),
+        Value::Array(values) => AutomationConfigValue::Array(
+            values
+                .iter()
+                .map(automation_config_from_json_value)
+                .collect(),
+        ),
+        Value::String(value) => AutomationConfigValue::String(value.clone()),
+        Value::Number(value) => AutomationConfigValue::Number(value.to_string()),
+        Value::Bool(value) => AutomationConfigValue::Bool(*value),
+        Value::Null => AutomationConfigValue::Null,
+    }
+}
+
+fn automation_config_to_json_value(value: &AutomationConfigValue) -> Result<Value, HueError> {
+    match value {
+        AutomationConfigValue::Object(entries) => Ok(Value::Object(
+            entries
+                .iter()
+                .map(|entry| {
+                    automation_config_to_json_value(&entry.value)
+                        .map(|value| (entry.key.clone(), value))
+                })
+                .collect::<Result<serde_json::Map<String, Value>, HueError>>()?,
+        )),
+        AutomationConfigValue::Array(values) => Ok(Value::Array(
+            values
+                .iter()
+                .map(automation_config_to_json_value)
+                .collect::<Result<Vec<_>, HueError>>()?,
+        )),
+        AutomationConfigValue::String(value) => Ok(Value::String(value.clone())),
+        AutomationConfigValue::Number(value) => parse_json_number(value).map(Value::Number),
+        AutomationConfigValue::Bool(value) => Ok(Value::Bool(*value)),
+        AutomationConfigValue::Null => Ok(Value::Null),
+    }
+}
+
+fn parse_json_number(value: &str) -> Result<serde_json::Number, HueError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(HueError::UnexpectedResponse(
+            "automation configuration contains an empty numeric value",
+        ));
+    }
+
+    if let Ok(number) = trimmed.parse::<i64>() {
+        return Ok(serde_json::Number::from(number));
+    }
+    if let Ok(number) = trimmed.parse::<u64>() {
+        return Ok(serde_json::Number::from(number));
+    }
+    if let Ok(number) = trimmed.parse::<f64>() {
+        if let Some(number) = serde_json::Number::from_f64(number) {
+            return Ok(number);
+        }
+    }
+
+    Err(HueError::UnexpectedResponse(
+        "automation configuration contains an invalid numeric value",
+    ))
 }
 
 fn compare_light_ids(left: &str, right: &str) -> std::cmp::Ordering {
