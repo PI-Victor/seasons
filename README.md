@@ -90,6 +90,32 @@ The app persists its state in platform-appropriate config/data locations instead
 
 <img src="assets/Seasons-settings.png" alt="Settings page" width="70%" />
 
+## Connect to a Hue bridge
+
+For a first-time setup, the normal flow is:
+
+1. Open `Settings`.
+2. Press `Discover bridges`.
+3. Select the bridge you want to use.
+4. Press the physical button on the Hue bridge.
+5. In Seasons, press `Pair new app`.
+
+Seasons creates a local bridge user, fills in the generated username automatically, and stores the bridge session for later reconnects.
+
+### Reconnect with an existing username
+
+If you already have a username for this bridge and want to connect manually:
+
+1. Open `Settings`.
+2. Enter the bridge IP.
+3. Paste the existing username into the username field.
+4. Press `Connect bridge`.
+
+### Notes
+
+- Entertainment audio sync needs a pairing flow that generated a `clientkey`, so older saved connections may need to be paired once again.
+- The saved bridge session is persisted locally, so you should not need to reconnect every time unless you explicitly forget the bridge.
+
 ## Linux dependencies
 
 You need both the normal Tauri/WebKitGTK build stack and the PipeWire development package for audio sync.
