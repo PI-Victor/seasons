@@ -488,7 +488,7 @@ pub fn LightGrid(
                             ().into_any()
                         } else {
                             view! {
-                                <div class="panel-header compact-panel-header light-panel-header zone-panel-header">
+                                <div id="zones-section" class="panel-header compact-panel-header light-panel-header zone-panel-header">
                                     <div>
                                         <p class="panel-kicker">"Zones"</p>
                                         <h2>"Entertainment zones"</h2>

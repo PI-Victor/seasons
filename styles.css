@@ -286,6 +286,7 @@ input {
 .overview-pill {
   display: inline-flex;
   align-items: center;
+  gap: 0.45rem;
   min-height: 2.1rem;
   padding: 0.4rem 0.82rem;
   border-radius: 999px;
@@ -293,6 +294,18 @@ input {
   background: var(--pill-bg);
   color: var(--text-soft);
   font-size: 0.82rem;
+}
+
+.overview-pill-label {
+  color: var(--text-soft);
+  font-size: 0.73rem;
+  font-weight: 540;
+  letter-spacing: 0.015em;
+}
+
+.overview-pill-value {
+  color: var(--text);
+  font-weight: 610;
 }
 
 .metric-card,

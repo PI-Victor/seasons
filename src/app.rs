@@ -2433,7 +2433,7 @@ pub fn App() -> impl IntoView {
                 sensor
                     .summary
                     .clone()
-                    .map(|summary| format!("{} {}", sensor.name, summary))
+                    .map(|summary| (sensor.name.clone(), summary))
             } else {
                 None
             }
@@ -2474,19 +2474,37 @@ pub fn App() -> impl IntoView {
 
                 <div class="overview-pills">
                     <span class="overview-pill">
-                        {move || {
-                            active_connection
-                                .get()
-                                .map(|connection| format!("Bridge IP {}", connection.bridge_ip))
-                                .unwrap_or_else(|| "Bridge offline".to_string())
-                        }}
+                        <span class="overview-pill-label">"IP address"</span>
+                        <span class="overview-pill-value">
+                            {move || {
+                                active_connection
+                                    .get()
+                                    .map(|connection| connection.bridge_ip)
+                                    .unwrap_or_else(|| "Offline".to_string())
+                            }}
+                        </span>
                     </span>
-                    <span class="overview-pill">{move || format!("Lights on {}", active_light_count.get())}</span>
-                    <span class="overview-pill">{move || format!("Reachable lights {}", reachable_light_count.get())}</span>
+                    <span class="overview-pill">
+                        <span class="overview-pill-label">"Lights on"</span>
+                        <span class="overview-pill-value">{move || active_light_count.get()}</span>
+                    </span>
+                    <span class="overview-pill">
+                        <span class="overview-pill-label">"Reachable"</span>
+                        <span class="overview-pill-value">
+                            {move || format!("{} lights", reachable_light_count.get())}
+                        </span>
+                    </span>
                     {move || {
                         temperature_summary
                             .get()
-                            .map(|summary| view! { <span class="overview-pill">{summary}</span> })
+                            .map(|(sensor_name, summary)| {
+                                view! {
+                                    <span class="overview-pill">
+                                        <span class="overview-pill-label">{sensor_name}</span>
+                                        <span class="overview-pill-value">{summary}</span>
+                                    </span>
+                                }
+                            })
                     }}
                 </div>
             </section>
@@ -2571,6 +2589,7 @@ pub fn App() -> impl IntoView {
                     view! {
                         <section class="workspace-grid home-workspace-grid">
                             <section class="home-jump-links">
+                                <a class="home-jump-link" href="#zones-section">"Zones"</a>
                                 <a class="home-jump-link" href="#audio-sync-section">"Audio sync"</a>
                                 <a class="home-jump-link" href="#ai-control-section">"AI control"</a>
                             </section>
