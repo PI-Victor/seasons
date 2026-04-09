@@ -27,10 +27,11 @@ pub enum ThemePalette {
     Everforest,
     RosePine,
     Dayfox,
+    Synthwave,
 }
 
 impl ThemePalette {
-    pub const ALL: [ThemePalette; 7] = [
+    pub const ALL: [ThemePalette; 8] = [
         ThemePalette::Gruvbox,
         ThemePalette::Nordbones,
         ThemePalette::Sonokai,
@@ -38,6 +39,7 @@ impl ThemePalette {
         ThemePalette::Everforest,
         ThemePalette::RosePine,
         ThemePalette::Dayfox,
+        ThemePalette::Synthwave,
     ];
 
     pub fn label(self) -> &'static str {
@@ -49,6 +51,7 @@ impl ThemePalette {
             ThemePalette::Everforest => "Everforest",
             ThemePalette::RosePine => "Rose Pine",
             ThemePalette::Dayfox => "Dayfox",
+            ThemePalette::Synthwave => "Synthwave",
         }
     }
 
@@ -61,6 +64,7 @@ impl ThemePalette {
             ThemePalette::RosePine => "dawn/moon",
             ThemePalette::Gruvbox => "light/dark",
             ThemePalette::Everforest => "light/dark",
+            ThemePalette::Synthwave => "dark-native",
         }
     }
 }
@@ -568,6 +572,44 @@ impl ThemePreference {
                 chip_border: "rgba(131, 122, 114, 0.1)",
                 slider_bg: "rgba(131, 122, 114, 0.12)",
                 slider_fill: "linear-gradient(90deg, #AC5402, #287980)",
+            },
+            (ThemePalette::Synthwave, _) => ThemeTokens {
+                color_scheme: "dark",
+                bg: "#13051f",
+                bg_elevated: "rgba(19, 5, 31, 0.94)",
+                bg_card: "rgba(28, 10, 46, 0.9)",
+                line: "rgba(255, 77, 222, 0.22)",
+                line_strong: "rgba(0, 212, 255, 0.34)",
+                text: "#f6e9ff",
+                text_soft: "rgba(246, 233, 255, 0.74)",
+                amber: "#ff4dde",
+                amber_deep: "#7a3cff",
+                lime: "#00d4ff",
+                rose: "#ff4dde",
+                blue: "#35a4ff",
+                shadow: "0 26px 74px rgba(5, 0, 12, 0.45)",
+                page_glow_primary: "rgba(255, 77, 222, 0.24)",
+                page_glow_secondary: "rgba(0, 212, 255, 0.20)",
+                page_gradient: "linear-gradient(160deg, #13051f 0%, #1b0a33 54%, #081529 100%)",
+                panel_bg: "linear-gradient(160deg, rgba(255, 77, 222, 0.10), rgba(0, 212, 255, 0.04) 42%, transparent 78%), rgba(18, 8, 30, 0.86)",
+                banner_bg: "rgba(33, 16, 50, 0.88)",
+                pill_bg: "rgba(40, 21, 61, 0.78)",
+                pill_border: "rgba(255, 77, 222, 0.18)",
+                ghost_bg: "rgba(36, 19, 56, 0.74)",
+                ghost_border: "rgba(0, 212, 255, 0.16)",
+                secondary_bg: "rgba(46, 25, 71, 0.72)",
+                secondary_border: "rgba(0, 212, 255, 0.24)",
+                quit_bg: "rgba(255, 77, 222, 0.14)",
+                quit_border: "rgba(255, 95, 120, 0.28)",
+                accent_text: "#13051f",
+                primary_shadow: "0 16px 36px rgba(255, 77, 222, 0.24)",
+                scene_shell_bg: "rgba(44, 23, 68, 0.48)",
+                room_shell_bg: "rgba(33, 16, 50, 0.72)",
+                room_shell_border: "rgba(129, 88, 190, 0.16)",
+                chip_bg: "rgba(44, 23, 68, 0.72)",
+                chip_border: "rgba(0, 212, 255, 0.16)",
+                slider_bg: "rgba(148, 106, 212, 0.24)",
+                slider_fill: "linear-gradient(90deg, #ff4dde, #7a3cff 52%, #00d4ff)",
             },
         }
     }

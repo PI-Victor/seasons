@@ -1005,10 +1005,17 @@ fn palette_colors(
             false,
         ),
         AudioSyncColorPalette::NeonPulse => (
-            (0.70, 0.30, 1.0),
-            (0.08, 0.22, 1.0),
-            (1.0, 0.20, 0.84),
-            (0.22, 1.0, 0.88),
+            (0.24, 0.92, 1.0),
+            (0.68, 1.0, 0.18),
+            (0.24, 0.92, 1.0),
+            (0.60, 0.34, 1.0),
+            false,
+        ),
+        AudioSyncColorPalette::Synthwave => (
+            (1.0, 0.24, 0.82),
+            (0.34, 0.08, 0.78),
+            (1.0, 0.24, 0.82),
+            (0.0, 0.84, 1.0),
             false,
         ),
         AudioSyncColorPalette::Prism => (

@@ -26,6 +26,7 @@ pub enum ThemePalette {
     Everforest,
     RosePine,
     Dayfox,
+    Synthwave,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]

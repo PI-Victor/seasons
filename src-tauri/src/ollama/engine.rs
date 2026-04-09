@@ -833,6 +833,7 @@ fn planning_schema() -> serde_json::Value {
                                 "rose",
                                 "mono",
                                 "neonPulse",
+                                "synthwave",
                                 "prism",
                                 "vocalGlow",
                                 "fireIce"
@@ -1255,7 +1256,8 @@ fn parse_audio_sync_color_palette(
         "ocean" => AudioSyncColorPalette::Ocean,
         "rose" => AudioSyncColorPalette::Rose,
         "mono" => AudioSyncColorPalette::Mono,
-        "neonpulse" => AudioSyncColorPalette::NeonPulse,
+        "neonpulse" | "neonflux" => AudioSyncColorPalette::NeonPulse,
+        "synthwave" | "retrowave" => AudioSyncColorPalette::Synthwave,
         "prism" => AudioSyncColorPalette::Prism,
         "vocalglow" | "vocal" => AudioSyncColorPalette::VocalGlow,
         "fireice" => AudioSyncColorPalette::FireIce,

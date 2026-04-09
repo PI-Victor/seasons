@@ -102,6 +102,7 @@ fn serialize_palette(palette: ThemePalette) -> &'static str {
         ThemePalette::Everforest => "everforest",
         ThemePalette::RosePine => "rose-pine",
         ThemePalette::Dayfox => "dayfox",
+        ThemePalette::Synthwave => "synthwave",
     }
 }
 
@@ -113,6 +114,7 @@ fn parse_palette(value: String) -> ThemePalette {
         "catppuccin" => ThemePalette::Catppuccin,
         "everforest" => ThemePalette::Everforest,
         "dayfox" => ThemePalette::Dayfox,
+        "synthwave" => ThemePalette::Synthwave,
         _ => ThemePalette::RosePine,
     }
 }

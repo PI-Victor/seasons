@@ -210,6 +210,7 @@ pub enum AudioSyncColorPalette {
     Rose,
     Mono,
     NeonPulse,
+    Synthwave,
     Prism,
     VocalGlow,
     FireIce,
