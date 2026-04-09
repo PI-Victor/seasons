@@ -9,9 +9,11 @@ The project is primarily aimed at Linux, especially for features that are usuall
 
 - Room-first Hue control UI
 - Scene browsing, activation, creation, and deletion
+- Entertainment zone controls for Hue Entertainment areas
 - Device controls grouped by room or by type
 - Hue automations with dedicated editing flows
 - Entertainment audio sync over PipeWire on Linux
+- Optional Ollama-backed natural-language command routing
 
 ## Overview
 
@@ -20,8 +22,8 @@ Seasons is built around five top-level pages:
 - `Rooms` for the day-to-day room view and scene control
 - `Devices` for all controllable hardware grouped by type
 - `Automations` for Hue behavior instances and schedules
-- `Settings` for bridge management and theme selection
-- `Audio sync` as a collapsible control surface on the main page
+- `Settings` for bridge management, theme selection, and Ollama routing
+- `Audio sync` and `AI control` as collapsible control surfaces on the main page
 
 <img src="assets/Seasons-main.png" alt="Seasons main page" width="70%" />
 
@@ -39,6 +41,18 @@ The main page is room-first. Each room stays compact until you open it, then sho
 The room header is meant to be the fast control surface: you can toggle the room, set brightness, then open it only when you need scenes or individual devices.
 
 <img src="assets/Seasons-lights.png" alt="Expanded room view" width="70%" />
+
+### Entertainment zones
+
+The home page also includes a dedicated `Entertainment zones` section for Hue Entertainment areas. These cards work like room summaries, but target the bridge areas you use for sync and grouped playback scenarios.
+
+From there you can:
+
+- toggle the entire entertainment area
+- adjust its overall brightness
+- open the card and inspect or control the lights that belong to that zone
+
+<img src="assets/Seasons-zones.png" alt="Entertainment zones section" width="70%" />
 
 ### Devices
 
@@ -77,6 +91,19 @@ To use it:
 
 <img src="assets/Seasons-sync.png" alt="Audio sync panel" width="70%" />
 
+### AI control
+
+Seasons can also route natural-language commands through Ollama. The app sends a structured bridge snapshot to the configured model so it can plan exact actions for lights, scenes, automations, zones, and audio sync.
+
+Typical use is direct and local:
+
+- connect an Ollama endpoint in `Settings`
+- choose a model
+- enter a command on the main page
+- run it against the active bridge
+
+<img src="assets/Seasons-ollama.png" alt="AI control panel" width="70%" />
+
 ### Settings
 
 `Settings` is kept narrow on purpose. It covers:
@@ -85,6 +112,7 @@ To use it:
 - saved bridge management
 - reconnecting with an existing username
 - pairing a new local bridge app user
+- Ollama endpoint, model, token, and timeout configuration
 
 The app persists its state in platform-appropriate config/data locations instead of browser local storage.
 
