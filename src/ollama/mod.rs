@@ -17,5 +17,7 @@
 pub mod api;
 pub mod models;
 
-pub use api::{execute_ollama_command, load_ollama_settings, save_ollama_settings};
+pub use api::{
+    execute_ollama_command, load_ollama_settings, probe_ollama_connection, save_ollama_settings,
+};
 pub use models::{ExecuteOllamaCommandRequest, ExecuteOllamaCommandResult, OllamaSettings};

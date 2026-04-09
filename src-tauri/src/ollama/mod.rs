@@ -17,5 +17,5 @@
 pub mod engine;
 pub mod models;
 
-pub use engine::execute_ollama_command;
+pub use engine::{execute_ollama_command, probe_ollama_connection};
 pub use models::{ExecuteOllamaCommandRequest, ExecuteOllamaCommandResult, OllamaSettings};

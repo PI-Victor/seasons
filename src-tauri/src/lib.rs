@@ -61,6 +61,7 @@ pub fn run() {
             commands::load_ollama_settings,
             commands::save_ollama_settings,
             commands::execute_ollama_command,
+            commands::probe_ollama_connection,
             commands::quit_app,
             commands::load_theme_preference,
             commands::save_theme_preference,

@@ -449,6 +449,11 @@ pub async fn execute_ollama_command(
 }
 
 #[tauri::command]
+pub async fn probe_ollama_connection(settings: OllamaSettings) -> Result<(), String> {
+    ollama::probe_ollama_connection(settings).await
+}
+
+#[tauri::command]
 pub fn quit_app(app: AppHandle) {
     app.exit(0);
 }

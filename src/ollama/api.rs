@@ -35,6 +35,10 @@ pub async fn execute_ollama_command(
     invoke_with_named_args("execute_ollama_command", &[("request", &request)]).await
 }
 
+pub async fn probe_ollama_connection(settings: &OllamaSettings) -> Result<(), String> {
+    invoke_with_named_args("probe_ollama_connection", &[("settings", settings)]).await
+}
+
 async fn invoke_without_args<T>(cmd: &str) -> Result<T, String>
 where
     T: serde::de::DeserializeOwned,

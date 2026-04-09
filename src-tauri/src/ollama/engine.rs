@@ -558,6 +558,45 @@ pub async fn execute_ollama_command(
     })
 }
 
+pub async fn probe_ollama_connection(settings: OllamaSettings) -> Result<(), String> {
+    validate_ollama_settings(&settings)?;
+    let endpoint = ollama_tags_endpoint(&settings.base_url)?;
+    let timeout_seconds = settings.request_timeout_seconds.clamp(5, 120);
+    let client = Client::builder()
+        .timeout(Duration::from_secs(timeout_seconds))
+        .build()
+        .map_err(|error| format!("Failed to create Ollama HTTP client: {error}"))?;
+
+    let mut request = client.get(endpoint);
+    if let Some(api_key) = settings
+        .api_key
+        .as_ref()
+        .and_then(|value| clean_optional_string(Some(value.to_string())))
+    {
+        request = request.bearer_auth(api_key);
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|error| format!("Failed to contact Ollama: {error}"))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("Failed to read Ollama response: {error}"))?;
+
+    if !status.is_success() {
+        return Err(format!(
+            "Ollama returned HTTP {}: {}",
+            status.as_u16(),
+            truncate_for_error(&body)
+        ));
+    }
+
+    Ok(())
+}
+
 async fn request_action_plan(
     settings: &OllamaSettings,
     user_input: &str,
@@ -1255,6 +1294,19 @@ fn ollama_chat_endpoint(base_url: &str) -> Result<String, String> {
         Ok(format!("{trimmed}/chat"))
     } else {
         Ok(format!("{trimmed}/api/chat"))
+    }
+}
+
+fn ollama_tags_endpoint(base_url: &str) -> Result<String, String> {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err("Ollama base URL is required.".to_string());
+    }
+
+    if trimmed.ends_with("/api") {
+        Ok(format!("{trimmed}/tags"))
+    } else {
+        Ok(format!("{trimmed}/api/tags"))
     }
 }
 
