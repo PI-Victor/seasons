@@ -598,9 +598,10 @@ pub fn AutomationPanel(
                                                         </div>
                                                     })}
                                                 <div class="automation-card-footer">
-                                                    <button class="secondary-button automation-open-button">
+                                                    <span class="automation-open-indicator">
+                                                        <span class="fa-solid fa-sliders" aria-hidden="true"></span>
                                                         "Open editor"
-                                                    </button>
+                                                    </span>
                                                 </div>
                                             </article>
                                         }
