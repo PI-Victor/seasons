@@ -18,6 +18,7 @@ mod app_state;
 mod audio;
 mod commands;
 mod hue;
+mod ollama;
 mod theme;
 
 use tracing_subscriber::EnvFilter;
@@ -57,6 +58,9 @@ pub fn run() {
             commands::clear_persisted_room_order,
             commands::load_audio_sync_preferences,
             commands::save_audio_sync_preferences,
+            commands::load_ollama_settings,
+            commands::save_ollama_settings,
+            commands::execute_ollama_command,
             commands::quit_app,
             commands::load_theme_preference,
             commands::save_theme_preference,

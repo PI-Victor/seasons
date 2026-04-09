@@ -57,24 +57,49 @@ impl UiNotice {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UiToast {
+    pub id: u64,
+    pub notice: UiNotice,
+}
+
 #[component]
-pub fn StatusBanner(notice: ReadSignal<Option<UiNotice>>) -> impl IntoView {
+pub fn NotificationsPanel(
+    toasts: ReadSignal<Vec<UiToast>>,
+    on_dismiss: Callback<u64>,
+) -> impl IntoView {
     view! {
-        <Show when=move || notice.get().is_some()>
-            {move || {
-                notice.get().map(|notice| {
-                    let tone_class = notice.tone.class_name();
-                    view! {
-                        <section class=format!("status-banner {tone_class}")>
-                            <div class="status-marker"></div>
-                            <div class="status-copy">
-                                <strong>{notice.title}</strong>
-                                <p>{notice.message}</p>
-                            </div>
-                        </section>
-                    }
-                })
-            }}
+        <Show when=move || !toasts.get().is_empty()>
+            <div class="notification-toast-stack" aria-live="polite">
+                {move || {
+                    toasts
+                        .get()
+                        .into_iter()
+                        .take(2)
+                        .map(|toast| {
+                            let tone_class = toast.notice.tone.class_name();
+                            let toast_id = toast.id;
+                            view! {
+                                <article class=format!("notification-toast {tone_class}")>
+                                    <div class="notification-marker"></div>
+                                    <div class="notification-copy">
+                                        <strong>{toast.notice.title}</strong>
+                                        <p>{toast.notice.message}</p>
+                                    </div>
+                                    <button
+                                        class="notification-dismiss"
+                                        type="button"
+                                        aria-label="Dismiss notification"
+                                        on:click=move |_| on_dismiss.run(toast_id)
+                                    >
+                                        "×"
+                                    </button>
+                                </article>
+                            }
+                        })
+                        .collect_view()
+                }}
+            </div>
         </Show>
     }
 }

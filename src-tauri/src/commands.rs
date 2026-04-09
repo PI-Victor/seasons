@@ -19,11 +19,13 @@ use crate::app_state::{
     clear_room_order as state_clear_room_order,
     load_audio_sync_preferences as state_load_audio_sync_preferences,
     load_bridge_connection as state_load_bridge_connection,
-    load_room_order as state_load_room_order, load_theme_preference as state_load_theme_preference,
+    load_ollama_settings as state_load_ollama_settings, load_room_order as state_load_room_order,
+    load_theme_preference as state_load_theme_preference,
     save_audio_sync_preferences as state_save_audio_sync_preferences,
     save_bridge_connection as state_save_bridge_connection,
-    save_room_order as state_save_room_order, save_theme_preference as state_save_theme_preference,
-    AudioSyncPreferences, SaveRoomOrderRequest,
+    save_ollama_settings as state_save_ollama_settings, save_room_order as state_save_room_order,
+    save_theme_preference as state_save_theme_preference, AudioSyncPreferences,
+    SaveRoomOrderRequest,
 };
 use crate::audio::{capture, AudioSyncManager};
 use crate::hue::{
@@ -32,6 +34,9 @@ use crate::hue::{
     DeleteSceneRequest, DiscoveredBridge, EntertainmentArea, Group, HueBridgeClient,
     HueBridgeConfig, Light, PipeWireOutputTarget, RegisteredApp, Scene, Sensor,
     SetAutomationEnabledRequest, SetLightStateRequest, UpdateAutomationRequest,
+};
+use crate::ollama::{
+    self, ExecuteOllamaCommandRequest, ExecuteOllamaCommandResult, OllamaSettings,
 };
 use crate::theme::ThemePreference;
 use tauri::{AppHandle, State};
@@ -423,6 +428,24 @@ pub fn load_audio_sync_preferences() -> Result<AudioSyncPreferences, String> {
 #[tauri::command]
 pub fn save_audio_sync_preferences(preferences: AudioSyncPreferences) -> Result<(), String> {
     state_save_audio_sync_preferences(&preferences)
+}
+
+#[tauri::command]
+pub fn load_ollama_settings() -> Result<OllamaSettings, String> {
+    state_load_ollama_settings()
+}
+
+#[tauri::command]
+pub fn save_ollama_settings(settings: OllamaSettings) -> Result<(), String> {
+    state_save_ollama_settings(&settings)
+}
+
+#[tauri::command]
+pub async fn execute_ollama_command(
+    request: ExecuteOllamaCommandRequest,
+    audio_sync: State<'_, AudioSyncManager>,
+) -> Result<ExecuteOllamaCommandResult, String> {
+    ollama::execute_ollama_command(request, audio_sync.inner()).await
 }
 
 #[tauri::command]

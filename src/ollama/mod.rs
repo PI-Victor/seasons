@@ -14,22 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod app;
-mod desktop;
-mod hue;
-mod ollama;
-mod storage;
-mod theme;
-mod ui;
+pub mod api;
+pub mod models;
 
-use app::*;
-use leptos::prelude::*;
-
-fn main() {
-    console_error_panic_hook::set_once();
-    mount_to_body(|| {
-        view! {
-            <App/>
-        }
-    })
-}
+pub use api::{execute_ollama_command, load_ollama_settings, save_ollama_settings};
+pub use models::{ExecuteOllamaCommandRequest, ExecuteOllamaCommandResult, OllamaSettings};

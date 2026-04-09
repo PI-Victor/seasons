@@ -23,11 +23,14 @@ use crate::hue::{
     PipeWireOutputTarget, Scene, Sensor, SetAutomationEnabledRequest, SetLightStateRequest,
     UpdateAutomationRequest,
 };
+use crate::ollama::{
+    self, ExecuteOllamaCommandRequest, ExecuteOllamaCommandResult, OllamaSettings,
+};
 use crate::storage::{self, AudioSyncPreferences};
 use crate::theme::{apply_theme_preference, ThemeMode, ThemePalette, ThemePreference};
 use crate::ui::{
-    AudioSyncPanel, AutomationPanel, BridgePanel, DevicePanel, LightGrid, NoticeTone,
-    SceneComposerRequest, StatusBanner, ThemePanel, UiNotice,
+    AudioSyncPanel, AutomationPanel, BridgePanel, CommandPanel, DevicePanel, LightGrid, NoticeTone,
+    NotificationsPanel, OllamaPanel, SceneComposerRequest, ThemePanel, UiNotice, UiToast,
 };
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -79,6 +82,8 @@ pub fn App() -> impl IntoView {
         "Local-first Hue control",
         "Bridge setup is stored locally after a successful connection. Use settings only when you need to change it.",
     )));
+    let (notifications, set_notifications) = signal(Vec::<UiToast>::new());
+    let (next_notification_id, set_next_notification_id) = signal(1_u64);
     let (is_discovering, set_is_discovering) = signal(false);
     let (is_registering, set_is_registering) = signal(false);
     let (is_connecting, set_is_connecting) = signal(false);
@@ -91,6 +96,7 @@ pub fn App() -> impl IntoView {
     let (did_restore_theme, set_did_restore_theme) = signal(false);
     let (did_restore_audio_sync_preferences, set_did_restore_audio_sync_preferences) =
         signal(false);
+    let (did_restore_ollama_settings, set_did_restore_ollama_settings) = signal(false);
     let (did_load_pipewire_targets, set_did_load_pipewire_targets) = signal(false);
     let (last_applied_audio_sync_selection, set_last_applied_audio_sync_selection) =
         signal(AudioSyncSelection {
@@ -113,6 +119,58 @@ pub fn App() -> impl IntoView {
     let (last_activated_scene_id, set_last_activated_scene_id) = signal(None::<String>);
     let (room_order, set_room_order) = signal(Vec::<String>::new());
     let (theme_preference, set_theme_preference) = signal(ThemePreference::default());
+    let (ollama_settings, set_ollama_settings) = signal(OllamaSettings::default());
+    let (is_saving_ollama_settings, set_is_saving_ollama_settings) = signal(false);
+    let (ollama_command_input, set_ollama_command_input) = signal(String::new());
+    let (is_running_ollama_command, set_is_running_ollama_command) = signal(false);
+    let (ollama_result, set_ollama_result) = signal(None::<ExecuteOllamaCommandResult>);
+
+    Effect::new(move |_| {
+        if let Some(current_notice) = notice.get() {
+            let next_id = next_notification_id.get_untracked();
+            set_next_notification_id.set(next_id.saturating_add(1));
+            let toast = UiToast {
+                id: next_id,
+                notice: current_notice.clone(),
+            };
+
+            set_notifications.update(|items| {
+                if items
+                    .first()
+                    .map(|item| &item.notice)
+                    == Some(&current_notice)
+                {
+                    return;
+                }
+
+                items.insert(0, toast.clone());
+                if items.len() > 4 {
+                    items.truncate(4);
+                }
+            });
+
+            let timeout_toast_id = toast.id;
+            let dismiss_callback = Closure::once(move || {
+                set_notifications.update(|items| {
+                    items.retain(|item| item.id != timeout_toast_id);
+                });
+            });
+
+            if let Some(window) = leptos::web_sys::window() {
+                match window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                    dismiss_callback.as_ref().unchecked_ref(),
+                    10000,
+                ) {
+                    Ok(_) => dismiss_callback.forget(),
+                    Err(_) => {
+                        set_notifications.update(|items| {
+                            items.retain(|item| item.id != timeout_toast_id);
+                        });
+                    }
+                }
+            }
+        }
+    });
 
     let refresh_entertainment_areas = Callback::new({
         move |connection: BridgeConnection| {
@@ -379,6 +437,25 @@ pub fn App() -> impl IntoView {
                 Err(error) => {
                     set_notice.set(Some(UiNotice::warning(
                         "Could not restore audio sync preferences",
+                        error,
+                    )));
+                }
+            }
+        });
+    });
+
+    Effect::new(move |_| {
+        if did_restore_ollama_settings.get() {
+            return;
+        }
+
+        set_did_restore_ollama_settings.set(true);
+        spawn_local(async move {
+            match ollama::load_ollama_settings().await {
+                Ok(settings) => set_ollama_settings.set(settings),
+                Err(error) => {
+                    set_notice.set(Some(UiNotice::warning(
+                        "Could not restore Ollama settings",
                         error,
                     )));
                 }
@@ -714,6 +791,217 @@ pub fn App() -> impl IntoView {
             let mut preference = theme_preference.get_untracked();
             preference.palette = palette;
             save_theme_preference.run(preference);
+        }
+    });
+
+    let set_ollama_base_url = Callback::new({
+        move |value: String| {
+            set_ollama_settings.update(|settings| {
+                settings.base_url = value;
+            });
+        }
+    });
+
+    let set_ollama_model = Callback::new({
+        move |value: String| {
+            set_ollama_settings.update(|settings| {
+                settings.model = value;
+            });
+        }
+    });
+
+    let set_ollama_api_key = Callback::new({
+        move |value: String| {
+            let api_key = value.trim().to_string();
+            set_ollama_settings.update(|settings| {
+                settings.api_key = if api_key.is_empty() {
+                    None
+                } else {
+                    Some(api_key.clone())
+                };
+            });
+        }
+    });
+
+    let set_ollama_timeout = Callback::new({
+        move |value: String| {
+            let trimmed = value.trim();
+            let timeout = if trimmed.is_empty() {
+                30
+            } else {
+                trimmed.parse::<u64>().ok().unwrap_or(30).clamp(5, 120)
+            };
+            set_ollama_settings.update(|settings| {
+                settings.request_timeout_seconds = timeout;
+            });
+        }
+    });
+
+    let save_ollama_configuration = Callback::new({
+        move |()| {
+            let settings = ollama_settings.get_untracked();
+            if settings.base_url.trim().is_empty() {
+                set_notice.set(Some(UiNotice::warning(
+                    "Ollama base URL required",
+                    "Set a local or remote Ollama URL before saving.",
+                )));
+                return;
+            }
+            if settings.model.trim().is_empty() {
+                set_notice.set(Some(UiNotice::warning(
+                    "Ollama model required",
+                    "Set a model name before saving the command routing configuration.",
+                )));
+                return;
+            }
+
+            set_is_saving_ollama_settings.set(true);
+            spawn_local(async move {
+                match ollama::save_ollama_settings(&settings).await {
+                    Ok(()) => {
+                        set_notice.set(Some(UiNotice::success(
+                            "Ollama settings saved",
+                            "Command routing now targets the selected Ollama endpoint and model.",
+                        )));
+                    }
+                    Err(error) => {
+                        set_notice.set(Some(UiNotice::error(
+                            "Could not save Ollama settings",
+                            error,
+                        )));
+                    }
+                }
+                set_is_saving_ollama_settings.set(false);
+            });
+        }
+    });
+
+    let execute_ollama_instruction = Callback::new({
+        move |()| {
+            if is_running_ollama_command.get_untracked() {
+                return;
+            }
+
+            let Some(connection) = active_connection.get_untracked() else {
+                set_notice.set(Some(UiNotice::warning(
+                    "No active bridge connection",
+                    "Connect to a bridge before running natural-language commands.",
+                )));
+                return;
+            };
+
+            let input = ollama_command_input.get_untracked().trim().to_string();
+            if input.is_empty() {
+                set_notice.set(Some(UiNotice::warning(
+                    "Command required",
+                    "Enter a natural-language command before executing it.",
+                )));
+                return;
+            }
+
+            set_is_running_ollama_command.set(true);
+
+            spawn_local(async move {
+                let request = ExecuteOllamaCommandRequest {
+                    input,
+                    connection: connection.clone(),
+                };
+
+                match ollama::execute_ollama_command(request).await {
+                    Ok(result) => {
+                        let execution_connection = result
+                            .updated_connection
+                            .clone()
+                            .unwrap_or_else(|| connection.clone());
+                        let mut refresh_error: Option<String> = None;
+
+                        if let Some(updated_connection) = result.updated_connection.clone() {
+                            set_selected_bridge_ip.set(updated_connection.bridge_ip.clone());
+                            set_username.set(updated_connection.username.clone());
+                            set_active_connection.set(Some(updated_connection.clone()));
+                            let _ = storage::save_bridge_connection(&updated_connection).await;
+                        }
+
+                        if result.bridge_state_changed {
+                            match fetch_bridge_snapshot(execution_connection.clone()).await {
+                                Ok((
+                                    fetched_lights,
+                                    fetched_scenes,
+                                    fetched_groups,
+                                    fetched_sensors,
+                                )) => {
+                                    set_lights.set(fetched_lights);
+                                    set_scenes.set(fetched_scenes);
+                                    set_groups.set(fetched_groups);
+                                    set_sensors.set(fetched_sensors);
+                                    set_active_connection.set(Some(execution_connection.clone()));
+                                    refresh_entertainment_areas.run(execution_connection.clone());
+                                    refresh_automations.run(execution_connection);
+                                }
+                                Err(error) => {
+                                    refresh_error = Some(error);
+                                }
+                            }
+                        }
+
+                        let action_count = result.actions.len();
+                        let error_count = result
+                            .actions
+                            .iter()
+                            .filter(|action| action.status == "error")
+                            .count();
+                        let partial_count = result
+                            .actions
+                            .iter()
+                            .filter(|action| action.status == "partial")
+                            .count();
+                        let assistant_message = result.assistant_message.clone();
+
+                        set_ollama_result.set(Some(result));
+
+                        if let Some(error) = refresh_error {
+                            set_notice.set(Some(UiNotice::warning(
+                                "Command executed, refresh failed",
+                                error,
+                            )));
+                        } else if action_count == 0 {
+                            set_notice.set(Some(UiNotice::warning(
+                                "No actions executed",
+                                assistant_message,
+                            )));
+                        } else if error_count == 0 && partial_count == 0 {
+                            set_notice.set(Some(UiNotice::success(
+                                "Command executed",
+                                format!(
+                                    "{} action{} completed. {}",
+                                    action_count,
+                                    pluralize(action_count),
+                                    assistant_message
+                                ),
+                            )));
+                        } else {
+                            set_notice.set(Some(UiNotice::warning(
+                                "Command executed with issues",
+                                format!(
+                                    "{} action{}, {} error{}, {} partial result{}. {}",
+                                    action_count,
+                                    pluralize(action_count),
+                                    error_count,
+                                    pluralize(error_count),
+                                    partial_count,
+                                    pluralize(partial_count),
+                                    assistant_message
+                                ),
+                            )));
+                        }
+                    }
+                    Err(error) => {
+                        set_notice.set(Some(UiNotice::error("Command execution failed", error)));
+                    }
+                }
+
+                set_is_running_ollama_command.set(false);
+            });
         }
     });
 
@@ -1891,14 +2179,6 @@ pub fn App() -> impl IntoView {
         }
     });
 
-    let active_light_count = Signal::derive(move || {
-        lights
-            .get()
-            .iter()
-            .filter(|light| light.is_on.unwrap_or(false))
-            .count()
-    });
-
     let quit_application = Callback::new({
         move |()| {
             spawn_local(async move {
@@ -1907,6 +2187,13 @@ pub fn App() -> impl IntoView {
                 }
             });
         }
+    });
+    let active_light_count = Signal::derive(move || {
+        lights
+            .get()
+            .iter()
+            .filter(|light| light.is_on.unwrap_or(false))
+            .count()
     });
     let reachable_light_count = Signal::derive(move || {
         lights
@@ -1936,88 +2223,7 @@ pub fn App() -> impl IntoView {
             <div class="ambient-glow ambient-glow-primary"></div>
             <div class="ambient-glow ambient-glow-secondary"></div>
 
-            <header class="topbar">
-                <div class="topbar-brand">
-                    <span class="topbar-kicker">"Hue Desktop"</span>
-                    <strong>"Seasons"</strong>
-                </div>
-
-                <div class="topbar-toolbar">
-                    <div class="topbar-actions">
-                        <button
-                            class=move || {
-                                if page.get() == AppPage::Home {
-                                    "ghost-button nav-button is-active"
-                                } else {
-                                    "ghost-button nav-button"
-                                }
-                            }
-                            on:click=move |_| set_page.set(AppPage::Home)
-                        >
-                            <span class="nav-button-content">
-                                <span class="fa-solid fa-house" aria-hidden="true"></span>
-                                <span>"Rooms"</span>
-                            </span>
-                        </button>
-                        <button
-                            class=move || {
-                                if page.get() == AppPage::Devices {
-                                    "ghost-button nav-button is-active"
-                                } else {
-                                    "ghost-button nav-button"
-                                }
-                            }
-                            on:click=move |_| set_page.set(AppPage::Devices)
-                        >
-                            <span class="nav-button-content">
-                                <span class="fa-solid fa-lightbulb" aria-hidden="true"></span>
-                                <span>"Devices"</span>
-                            </span>
-                        </button>
-                        <button
-                            class=move || {
-                                if page.get() == AppPage::Automations {
-                                    "ghost-button nav-button is-active"
-                                } else {
-                                    "ghost-button nav-button"
-                                }
-                            }
-                            on:click=move |_| set_page.set(AppPage::Automations)
-                        >
-                            <span class="nav-button-content">
-                                <span class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></span>
-                                <span>"Automations"</span>
-                            </span>
-                        </button>
-                        <button
-                            class=move || {
-                                if page.get() == AppPage::Settings {
-                                    "ghost-button nav-button is-active"
-                                } else {
-                                    "ghost-button nav-button"
-                                }
-                            }
-                            on:click=move |_| set_page.set(AppPage::Settings)
-                        >
-                            <span class="nav-button-content">
-                                <span class="fa-solid fa-gear" aria-hidden="true"></span>
-                                <span>"Settings"</span>
-                            </span>
-                        </button>
-                    </div>
-                    <button
-                        class="ghost-button quit-button topbar-quit"
-                        on:click=move |_| quit_application.run(())
-                    >
-                        <span class="nav-button-content">
-                            <span class="fa-solid fa-xmark" aria-hidden="true"></span>
-                            <span>"Quit"</span>
-                        </span>
-                    </button>
-                </div>
-            </header>
-
-            <section class="overview-strip surface-panel">
+            <section class="overview-strip overview-flat">
                 <div class="overview-copy">
                     <p class="hero-kicker">"Hue Home View"</p>
                     <h1>"Seasons"</h1>
@@ -2045,7 +2251,14 @@ pub fn App() -> impl IntoView {
                 </div>
             </section>
 
-            <StatusBanner notice=notice />
+            <NotificationsPanel
+                toasts=notifications
+                on_dismiss=Callback::new(move |toast_id: u64| {
+                    set_notifications.update(|items| {
+                        items.retain(|item| item.id != toast_id);
+                    });
+                })
+            />
 
             {move || {
                 if page.get() == AppPage::Settings {
@@ -2074,6 +2287,16 @@ pub fn App() -> impl IntoView {
                                 on_connect=connect_bridge
                                 on_register=pair_new_app
                                 on_forget=forget_bridge
+                            />
+
+                            <OllamaPanel
+                                settings=ollama_settings
+                                is_saving=is_saving_ollama_settings
+                                on_base_url_input=set_ollama_base_url
+                                on_model_input=set_ollama_model
+                                on_api_key_input=set_ollama_api_key
+                                on_timeout_input=set_ollama_timeout
+                                on_save=save_ollama_configuration
                             />
                         </section>
                     }.into_any()
@@ -2104,7 +2327,7 @@ pub fn App() -> impl IntoView {
                     }.into_any()
                 } else {
                     view! {
-                        <section class="workspace-grid">
+                        <section class="workspace-grid home-workspace-grid">
                             <AudioSyncPanel
                                 active_connection=active_connection
                                 entertainment_areas=entertainment_areas
@@ -2123,6 +2346,15 @@ pub fn App() -> impl IntoView {
                                 on_select_sync_color_palette=select_sync_color_palette
                                 on_start=start_audio_sync
                                 on_stop=stop_audio_sync
+                            />
+
+                            <CommandPanel
+                                active_connection=active_connection
+                                command_input=ollama_command_input
+                                is_executing=is_running_ollama_command
+                                last_result=ollama_result
+                                on_input=Callback::new(move |value: String| set_ollama_command_input.set(value))
+                                on_execute=execute_ollama_instruction
                             />
 
                             <LightGrid
@@ -2153,6 +2385,80 @@ pub fn App() -> impl IntoView {
                     }.into_any()
                 }
             }}
+
+            <footer class="bottom-nav">
+                <nav class="bottom-nav-inner" aria-label="Primary">
+                    <button
+                        class=move || {
+                            if page.get() == AppPage::Home {
+                                "ghost-button nav-button is-active"
+                            } else {
+                                "ghost-button nav-button"
+                            }
+                        }
+                        on:click=move |_| set_page.set(AppPage::Home)
+                    >
+                        <span class="nav-button-content">
+                            <span class="fa-solid fa-house" aria-hidden="true"></span>
+                            <span>"Rooms"</span>
+                        </span>
+                    </button>
+                    <button
+                        class=move || {
+                            if page.get() == AppPage::Devices {
+                                "ghost-button nav-button is-active"
+                            } else {
+                                "ghost-button nav-button"
+                            }
+                        }
+                        on:click=move |_| set_page.set(AppPage::Devices)
+                    >
+                        <span class="nav-button-content">
+                            <span class="fa-solid fa-lightbulb" aria-hidden="true"></span>
+                            <span>"Devices"</span>
+                        </span>
+                    </button>
+                    <button
+                        class=move || {
+                            if page.get() == AppPage::Automations {
+                                "ghost-button nav-button is-active"
+                            } else {
+                                "ghost-button nav-button"
+                            }
+                        }
+                        on:click=move |_| set_page.set(AppPage::Automations)
+                    >
+                        <span class="nav-button-content">
+                            <span class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></span>
+                            <span>"Automations"</span>
+                        </span>
+                    </button>
+                    <button
+                        class=move || {
+                            if page.get() == AppPage::Settings {
+                                "ghost-button nav-button is-active"
+                            } else {
+                                "ghost-button nav-button"
+                            }
+                        }
+                        on:click=move |_| set_page.set(AppPage::Settings)
+                    >
+                        <span class="nav-button-content">
+                            <span class="fa-solid fa-gear" aria-hidden="true"></span>
+                            <span>"Settings"</span>
+                        </span>
+                    </button>
+                    <button
+                        class="ghost-button quit-button"
+                        on:click=move |_| quit_application.run(())
+                    >
+                        <span class="nav-button-content">
+                            <span class="fa-solid fa-xmark" aria-hidden="true"></span>
+                            <span>"Quit"</span>
+                        </span>
+                    </button>
+                </nav>
+            </footer>
         </main>
     }
 }

@@ -15,6 +15,7 @@
 // limitations under the License.
 
 use crate::hue::{AudioSyncColorPalette, AudioSyncSpeedMode, BridgeConnection};
+use crate::ollama::OllamaSettings;
 use crate::theme::ThemePreference;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -38,6 +39,7 @@ struct AppConfigFile {
     last_connection: Option<BridgeConnection>,
     theme_preference: ThemePreference,
     audio_sync: AudioSyncPreferences,
+    ollama: OllamaSettings,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -92,6 +94,17 @@ pub fn load_audio_sync_preferences() -> Result<AudioSyncPreferences, String> {
 pub fn save_audio_sync_preferences(preferences: &AudioSyncPreferences) -> Result<(), String> {
     let mut config = read_json::<AppConfigFile>(&config_file_path()?)?;
     config.audio_sync = preferences.clone();
+    write_json(&config_file_path()?, &config)
+}
+
+pub fn load_ollama_settings() -> Result<OllamaSettings, String> {
+    let config = read_json::<AppConfigFile>(&config_file_path()?)?;
+    Ok(config.ollama)
+}
+
+pub fn save_ollama_settings(settings: &OllamaSettings) -> Result<(), String> {
+    let mut config = read_json::<AppConfigFile>(&config_file_path()?)?;
+    config.ollama = settings.clone();
     write_json(&config_file_path()?, &config)
 }
 
@@ -208,6 +221,7 @@ fn room_order_key(connection: &BridgeConnection) -> String {
 mod tests {
     use super::{room_order_key, AppConfigFile, AppDataFile, AudioSyncPreferences};
     use crate::hue::{AudioSyncColorPalette, AudioSyncSpeedMode, BridgeConnection};
+    use crate::ollama::OllamaSettings;
     use crate::theme::{ThemeMode, ThemePalette, ThemePreference};
 
     #[test]
@@ -244,6 +258,7 @@ mod tests {
                 selected_sync_color_palette: AudioSyncColorPalette::CurrentRoom,
             }
         );
+        assert_eq!(config.ollama, OllamaSettings::default());
         assert!(data.room_orders.is_empty());
     }
 }
