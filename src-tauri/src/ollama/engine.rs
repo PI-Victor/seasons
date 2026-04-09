@@ -14,8 +14,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::app_state::{load_audio_sync_preferences, load_ollama_settings, AudioSyncPreferences};
-use crate::audio::{capture, AudioSyncManager};
+use crate::app_state::{AudioSyncPreferences, load_audio_sync_preferences, load_ollama_settings};
+use crate::audio::{AudioSyncManager, capture};
 use crate::hue::models::{GroupKind, LightStateUpdate};
 use crate::hue::{
     ActivateSceneRequest, AudioSyncColorPalette, AudioSyncSpeedMode, AudioSyncStartRequest,
@@ -29,8 +29,8 @@ use crate::ollama::models::{
 };
 use reqwest::Client;
 use serde::Serialize;
-use serde_json::{json, Map, Value};
-use tokio::time::{timeout, Duration};
+use serde_json::{Map, Value, json};
+use tokio::time::{Duration, timeout};
 use tracing::debug;
 
 const STATUS_OK: &str = "ok";
@@ -825,7 +825,18 @@ fn planning_schema() -> serde_json::Value {
                         "speedMode": { "type": "string", "enum": ["slow", "medium", "high"] },
                         "colorPalette": {
                             "type": "string",
-                            "enum": ["currentRoom", "sunset", "aurora", "ocean", "rose", "mono"]
+                            "enum": [
+                                "currentRoom",
+                                "sunset",
+                                "aurora",
+                                "ocean",
+                                "rose",
+                                "mono",
+                                "neonPulse",
+                                "prism",
+                                "vocalGlow",
+                                "fireIce"
+                            ]
                         },
                         "baseColorHex": { "type": "string" },
                         "brightnessCeiling": { "type": "integer", "minimum": 1, "maximum": 254 }
@@ -1040,8 +1051,7 @@ fn parse_planned_response_value(value: Value) -> Result<PlannedResponse, String>
             Value::Array(items) => {
                 for item in items {
                     if let Some(action) = normalize_action_value(item) {
-                        if let Ok(parsed_action) = serde_json::from_value::<PlannedAction>(action)
-                        {
+                        if let Ok(parsed_action) = serde_json::from_value::<PlannedAction>(action) {
                             actions.push(parsed_action);
                         }
                     }
@@ -1102,7 +1112,11 @@ fn normalize_action_value(value: &Value) -> Option<Value> {
     normalize_action_key(&mut normalized, "speed_mode", &["speedMode"]);
     normalize_action_key(&mut normalized, "color_palette", &["colorPalette"]);
     normalize_action_key(&mut normalized, "base_color_hex", &["baseColorHex"]);
-    normalize_action_key(&mut normalized, "brightness_ceiling", &["brightnessCeiling"]);
+    normalize_action_key(
+        &mut normalized,
+        "brightness_ceiling",
+        &["brightnessCeiling"],
+    );
     normalize_action_key(&mut normalized, "transition_time", &["transitionTime"]);
 
     let raw_type = normalized
@@ -1120,7 +1134,10 @@ fn normalize_action_value(value: &Value) -> Option<Value> {
         "updateaudiosync" => "updateAudioSync",
         _ => return None,
     };
-    normalized.insert("type".to_string(), Value::String(normalized_type.to_string()));
+    normalized.insert(
+        "type".to_string(),
+        Value::String(normalized_type.to_string()),
+    );
 
     Some(Value::Object(normalized))
 }
@@ -1238,6 +1255,10 @@ fn parse_audio_sync_color_palette(
         "ocean" => AudioSyncColorPalette::Ocean,
         "rose" => AudioSyncColorPalette::Rose,
         "mono" => AudioSyncColorPalette::Mono,
+        "neonpulse" => AudioSyncColorPalette::NeonPulse,
+        "prism" => AudioSyncColorPalette::Prism,
+        "vocalglow" | "vocal" => AudioSyncColorPalette::VocalGlow,
+        "fireice" => AudioSyncColorPalette::FireIce,
         _ => AudioSyncColorPalette::CurrentRoom,
     }
 }
@@ -1372,11 +1393,7 @@ fn action_error(
 }
 
 fn pluralize(count: usize) -> &'static str {
-    if count == 1 {
-        ""
-    } else {
-        "s"
-    }
+    if count == 1 { "" } else { "s" }
 }
 
 fn normalize_for_similarity(value: &str) -> String {

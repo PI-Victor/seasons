@@ -25,7 +25,7 @@ use crate::hue::models::{
 };
 use reqwest::Client;
 use serde_json::Value;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 const HUE_APPLICATION_KEY_HEADER: &str = "hue-application-key";
 const HUE_APPLICATION_ID_HEADER: &str = "hue-application-id";
@@ -122,6 +122,13 @@ impl HueBridgeClient {
             "{}/resource/entertainment_configuration",
             self.config.clip_v2_base_url()
         );
+        let light_id_map = match self.fetch_clip_v2_light_id_v1_map().await {
+            Ok(map) => map,
+            Err(error) => {
+                warn!("could not build clip v2 light id map for entertainment areas: {error}");
+                std::collections::HashMap::new()
+            }
+        };
 
         let body = self
             .http
@@ -138,6 +145,25 @@ impl HueBridgeClient {
             .data
             .into_iter()
             .map(EntertainmentArea::from)
+            .map(|mut area| {
+                area.light_ids = area
+                    .light_ids
+                    .iter()
+                    .filter_map(|light_id| {
+                        normalize_entertainment_light_id(light_id, &light_id_map)
+                    })
+                    .collect::<Vec<_>>();
+                area.light_ids.sort();
+                area.light_ids.dedup();
+                if area.light_ids.is_empty() {
+                    warn!(
+                        area_id = %area.id,
+                        area_name = %area.name,
+                        "entertainment area resolved without any v1 light IDs"
+                    );
+                }
+                area
+            })
             .collect::<Vec<_>>();
         areas.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
         info!(count = areas.len(), "loaded Hue entertainment areas");
@@ -730,6 +756,43 @@ impl HueBridgeClient {
             .ok_or_else(|| extract_api_error(&body))
     }
 
+    async fn fetch_clip_v2_light_id_v1_map(
+        &self,
+    ) -> Result<std::collections::HashMap<String, String>, HueError> {
+        let endpoint = format!("{}/resource/light", self.config.clip_v2_base_url());
+        let body = self
+            .http
+            .get(endpoint)
+            .header(HUE_APPLICATION_KEY_HEADER, self.config.application_key()?)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+
+        let value = serde_json::from_str::<Value>(&body).map_err(|_| extract_api_error(&body))?;
+        let data = value
+            .get("data")
+            .and_then(Value::as_array)
+            .ok_or_else(|| extract_api_error(&body))?;
+
+        let mut mapping = std::collections::HashMap::new();
+        for item in data {
+            let Some(rid) = item.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(id_v1) = item.get("id_v1").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(v1_light_id) = extract_v1_light_id(id_v1) else {
+                continue;
+            };
+            mapping.insert(rid.to_string(), v1_light_id);
+        }
+
+        Ok(mapping)
+    }
+
     async fn set_entertainment_area_action(
         &self,
         area_id: &str,
@@ -920,6 +983,38 @@ fn scene_id_from_path(value: &str) -> Option<&str> {
     value
         .strip_prefix("/scenes/")
         .filter(|scene_id| !scene_id.is_empty())
+}
+
+fn extract_v1_light_id(value: &str) -> Option<String> {
+    value
+        .trim()
+        .strip_prefix("/lights/")
+        .filter(|light_id| !light_id.is_empty())
+        .map(|light_id| light_id.to_string())
+}
+
+fn normalize_entertainment_light_id(
+    value: &str,
+    clip_v2_to_v1_light_map: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some(mapped) = clip_v2_to_v1_light_map.get(trimmed) {
+        return Some(mapped.clone());
+    }
+
+    if let Some(v1_light_id) = extract_v1_light_id(trimmed) {
+        return Some(v1_light_id);
+    }
+
+    if trimmed.chars().all(|character| character.is_ascii_digit()) {
+        return Some(trimmed.to_string());
+    }
+
+    None
 }
 
 fn recover_created_scene_id(
@@ -1245,10 +1340,11 @@ fn wrap_hue(hue: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        compare_light_ids, ensure_success_body, ensure_success_only, extract_api_error,
-        extract_created_scene_id, extract_created_scene_id_from_body, extract_first_success,
-        group_scene_create_body, recover_created_scene_id, scene_id_from_path, SceneCatalogEntry,
-        ScenePreview,
+        SceneCatalogEntry, ScenePreview, compare_light_ids, ensure_success_body,
+        ensure_success_only, extract_api_error, extract_created_scene_id,
+        extract_created_scene_id_from_body, extract_first_success, extract_v1_light_id,
+        group_scene_create_body, normalize_entertainment_light_id, recover_created_scene_id,
+        scene_id_from_path,
     };
     use crate::hue::models::{CreateUserSuccessPayload, HueApiResponse, RawHueSceneLightState};
     use std::collections::HashMap;
@@ -1408,5 +1504,31 @@ mod tests {
 
         let scene_id = recover_created_scene_id(&before, &after, "Read", Some("7")).unwrap();
         assert_eq!(scene_id, "fresh");
+    }
+
+    #[test]
+    fn extracts_v1_light_id_from_v2_link() {
+        assert_eq!(extract_v1_light_id("/lights/12").as_deref(), Some("12"));
+        assert_eq!(extract_v1_light_id("12"), None);
+        assert_eq!(extract_v1_light_id("/lights/"), None);
+    }
+
+    #[test]
+    fn normalizes_entertainment_light_id_variants() {
+        let map = HashMap::from([("clip-v2-rid".to_string(), "9".to_string())]);
+
+        assert_eq!(
+            normalize_entertainment_light_id("clip-v2-rid", &map).as_deref(),
+            Some("9")
+        );
+        assert_eq!(
+            normalize_entertainment_light_id("/lights/12", &map).as_deref(),
+            Some("12")
+        );
+        assert_eq!(
+            normalize_entertainment_light_id("7", &map).as_deref(),
+            Some("7")
+        );
+        assert_eq!(normalize_entertainment_light_id("not-a-light", &map), None);
     }
 }

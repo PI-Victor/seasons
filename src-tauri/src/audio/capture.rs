@@ -38,16 +38,16 @@ use pw::spa::utils::dict::DictRef;
 #[cfg(target_os = "linux")]
 use pw::types::ObjectType;
 #[cfg(target_os = "macos")]
+use screencapturekit::AudioBufferList;
+#[cfg(target_os = "macos")]
 use screencapturekit::dispatch_queue::{DispatchQoS, DispatchQueue};
 #[cfg(target_os = "macos")]
 use screencapturekit::prelude::*;
-#[cfg(target_os = "macos")]
-use screencapturekit::AudioBufferList;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-use std::sync::mpsc::{sync_channel, SyncSender};
+use std::sync::mpsc::{SyncSender, sync_channel};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::sync::{Arc, Mutex};
 #[cfg(any(target_os = "linux", target_os = "macos"))]

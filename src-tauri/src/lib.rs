@@ -50,6 +50,7 @@ pub fn run() {
             commands::start_hue_audio_sync,
             commands::stop_hue_audio_sync,
             commands::update_hue_audio_sync,
+            commands::get_hue_audio_sync_preview,
             commands::load_persisted_bridge_connection,
             commands::save_persisted_bridge_connection,
             commands::clear_persisted_bridge_connection,

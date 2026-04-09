@@ -23,7 +23,9 @@ pub enum HueError {
     InvalidConfig(&'static str),
     #[error("Hue bridge username is required for this operation")]
     MissingUsername,
-    #[error("Hue bridge client key is required for entertainment streaming; pair this app again to enable audio sync")]
+    #[error(
+        "Hue bridge client key is required for entertainment streaming; pair this app again to enable audio sync"
+    )]
     MissingClientKey,
     #[error("Hue bridge returned an unexpected response: {0}")]
     UnexpectedResponse(&'static str),

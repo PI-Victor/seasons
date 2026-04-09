@@ -19,8 +19,11 @@ use crate::audio::capture::{AudioCaptureHandle, start_sink_capture};
 use crate::hue::entertainment::{EntertainmentStreamSession, build_rgb_channels, empty_rgb_frame};
 use crate::hue::error::HueError;
 use crate::hue::models::AudioSyncStartResult;
-use crate::hue::models::{AudioSyncColorPalette, AudioSyncSpeedMode};
-use crate::hue::{BridgeConnection, EntertainmentArea, HueBridgeClient, HueBridgeConfig};
+use crate::hue::models::{
+    AudioSyncColorPalette, AudioSyncPreview, AudioSyncSpeedMode, LightStateUpdate,
+};
+use crate::hue::{BridgeConnection, EntertainmentArea, HueBridgeClient, HueBridgeConfig, Light};
+use std::collections::HashSet;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::oneshot;
@@ -30,6 +33,7 @@ use tracing::{debug, info, trace};
 
 pub struct AudioSyncManager {
     running: Mutex<Option<RunningAudioSyncSession>>,
+    preview: Arc<RwLock<Option<AudioSyncPreview>>>,
 }
 
 struct RunningAudioSyncSession {
@@ -39,12 +43,20 @@ struct RunningAudioSyncSession {
     stream_task: JoinHandle<()>,
     capture: AudioCaptureHandle,
     profile: Arc<RwLock<StreamProfile>>,
+    restore_snapshot: Vec<LightRestoreState>,
+}
+
+#[derive(Clone)]
+struct LightRestoreState {
+    light_id: String,
+    state: LightStateUpdate,
 }
 
 impl AudioSyncManager {
     pub fn new() -> Self {
         Self {
             running: Mutex::new(None),
+            preview: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -76,6 +88,7 @@ impl AudioSyncManager {
             connection.username.clone(),
         )?;
         let client = HueBridgeClient::new(config)?;
+        let restore_snapshot = capture_restore_snapshot(&client, &area).await?;
 
         let mut resolved_connection = connection.clone();
         if resolved_connection
@@ -111,9 +124,18 @@ impl AudioSyncManager {
         let (stop_tx, stop_rx) = oneshot::channel();
         let task_area = area.clone();
         let task_profile = Arc::clone(&stream_profile);
+        let task_preview = Arc::clone(&self.preview);
 
         let stream_task = tokio::spawn(async move {
-            let _ = run_stream_loop(stream, task_area, feature_rx, stop_rx, task_profile).await;
+            let _ = run_stream_loop(
+                stream,
+                task_area,
+                feature_rx,
+                stop_rx,
+                task_profile,
+                task_preview,
+            )
+            .await;
         });
 
         let mut guard = self.running.lock().map_err(|_| {
@@ -126,6 +148,7 @@ impl AudioSyncManager {
             stream_task,
             capture,
             profile: stream_profile,
+            restore_snapshot,
         });
 
         info!("Hue audio sync started successfully");
@@ -145,6 +168,9 @@ impl AudioSyncManager {
         };
 
         let Some(running) = running else {
+            if let Ok(mut preview) = self.preview.write() {
+                *preview = None;
+            }
             return Ok(());
         };
         info!(area_id = %running.area_id, "stopping Hue audio sync");
@@ -158,9 +184,30 @@ impl AudioSyncManager {
             running.connection.username.clone(),
         )?;
         let client = HueBridgeClient::new(config)?;
-        client.stop_entertainment_area(&running.area_id).await?;
+        let stop_result = client.stop_entertainment_area(&running.area_id).await;
+        let restore_result = restore_snapshot(&client, &running.restore_snapshot).await;
+        if let Ok(mut preview) = self.preview.write() {
+            *preview = None;
+        }
+
+        if let Err(stop_error) = stop_result {
+            if let Err(restore_error) = restore_result {
+                return Err(HueError::EntertainmentStream(format!(
+                    "stopping stream failed: {stop_error}; restoring previous light states also failed: {restore_error}"
+                )));
+            }
+            return Err(stop_error);
+        }
+        restore_result?;
         info!("Hue audio sync stopped");
         Ok(())
+    }
+
+    pub fn preview(&self) -> Result<Option<AudioSyncPreview>, HueError> {
+        let preview = self.preview.read().map_err(|_| {
+            HueError::EntertainmentStream("audio sync preview lock poisoned".to_string())
+        })?;
+        Ok(preview.clone())
     }
 
     pub fn update(
@@ -208,6 +255,7 @@ async fn run_stream_loop(
     feature_rx: Receiver<AudioFeatures>,
     mut stop_rx: oneshot::Receiver<()>,
     profile: Arc<RwLock<StreamProfile>>,
+    preview: Arc<RwLock<Option<AudioSyncPreview>>>,
 ) -> Result<(), HueError> {
     let mut latest = AudioFeatures::default();
     let mut window_peak = AudioFeatures::default();
@@ -273,6 +321,20 @@ async fn run_stream_loop(
                 let channels = if !saw_audio {
                     if frame_index == 0 {
                         debug!("no audio features received yet; holding current profile frame");
+                    }
+                    if let Ok(mut preview) = preview.write() {
+                        let (red, green, blue) = if profile.lock_base_hue {
+                            profile.base_color
+                        } else {
+                            profile.mid_color
+                        };
+                        *preview = Some(AudioSyncPreview {
+                            entertainment_area_id: area.id.clone(),
+                            red: (red * 255.0).round().clamp(0.0, 255.0) as u8,
+                            green: (green * 255.0).round().clamp(0.0, 255.0) as u8,
+                            blue: (blue * 255.0).round().clamp(0.0, 255.0) as u8,
+                            intensity: profile.idle_intensity.clamp(0.0, 1.0),
+                        });
                     }
                     profile.hold_channels(&area)
                 } else {
@@ -487,6 +549,16 @@ async fn run_stream_loop(
                         );
                     }
 
+                    if let Ok(mut preview) = preview.write() {
+                        *preview = Some(AudioSyncPreview {
+                            entertainment_area_id: area.id.clone(),
+                            red: (red * 255.0).round().clamp(0.0, 255.0) as u8,
+                            green: (green * 255.0).round().clamp(0.0, 255.0) as u8,
+                            blue: (blue * 255.0).round().clamp(0.0, 255.0) as u8,
+                            intensity: intensity.clamp(0.0, 1.0),
+                        });
+                    }
+
                     build_rgb_channels(&area.channels, red, green, blue, intensity)
                 };
                 if frame_index % 25 == 0 {
@@ -505,6 +577,72 @@ async fn run_stream_loop(
                 stream.write_rgb_frame(&channels).await?;
                 frame_index = frame_index.wrapping_add(1);
             }
+        }
+    }
+}
+
+async fn capture_restore_snapshot(
+    client: &HueBridgeClient,
+    area: &EntertainmentArea,
+) -> Result<Vec<LightRestoreState>, HueError> {
+    let area_light_ids = area
+        .light_ids
+        .iter()
+        .map(|light_id| light_id.as_str())
+        .collect::<HashSet<_>>();
+    if area_light_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let lights = client.list_lights().await?;
+    let snapshot = lights
+        .iter()
+        .filter(|light| area_light_ids.contains(light.id.as_str()))
+        .map(|light| LightRestoreState {
+            light_id: light.id.clone(),
+            state: restore_state_from_light(light),
+        })
+        .collect::<Vec<_>>();
+
+    Ok(snapshot)
+}
+
+async fn restore_snapshot(
+    client: &HueBridgeClient,
+    snapshot: &[LightRestoreState],
+) -> Result<(), HueError> {
+    let mut first_error: Option<HueError> = None;
+    for entry in snapshot {
+        if let Err(error) = client.set_light_state(&entry.light_id, &entry.state).await {
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
+        }
+    }
+
+    if let Some(error) = first_error {
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn restore_state_from_light(light: &Light) -> LightStateUpdate {
+    let is_on = light.is_on.unwrap_or(false);
+    if is_on {
+        LightStateUpdate {
+            on: Some(true),
+            brightness: light.brightness,
+            saturation: light.saturation,
+            hue: light.hue,
+            transition_time: Some(4),
+        }
+    } else {
+        LightStateUpdate {
+            on: Some(false),
+            brightness: None,
+            saturation: None,
+            hue: None,
+            transition_time: Some(4),
         }
     }
 }

@@ -56,6 +56,7 @@ pub struct AudioSyncPreferences {
     pub selected_pipewire_target_object: Option<String>,
     pub selected_sync_speed_mode: AudioSyncSpeedMode,
     pub selected_sync_color_palette: AudioSyncColorPalette,
+    pub selected_sync_brightness_ceiling: Option<u8>,
 }
 
 pub fn load_bridge_connection() -> Result<Option<BridgeConnection>, String> {
@@ -219,7 +220,7 @@ fn room_order_key(connection: &BridgeConnection) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{room_order_key, AppConfigFile, AppDataFile, AudioSyncPreferences};
+    use super::{AppConfigFile, AppDataFile, AudioSyncPreferences, room_order_key};
     use crate::hue::{AudioSyncColorPalette, AudioSyncSpeedMode, BridgeConnection};
     use crate::ollama::OllamaSettings;
     use crate::theme::{ThemeMode, ThemePalette, ThemePreference};
@@ -256,6 +257,7 @@ mod tests {
                 selected_pipewire_target_object: None,
                 selected_sync_speed_mode: AudioSyncSpeedMode::Medium,
                 selected_sync_color_palette: AudioSyncColorPalette::CurrentRoom,
+                selected_sync_brightness_ceiling: None,
             }
         );
         assert_eq!(config.ollama, OllamaSettings::default());

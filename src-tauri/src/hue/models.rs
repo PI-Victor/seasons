@@ -60,6 +60,8 @@ pub struct EntertainmentArea {
     pub configuration_type: Option<String>,
     pub status: String,
     pub channels: Vec<EntertainmentChannel>,
+    #[serde(default)]
+    pub light_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -178,6 +180,16 @@ pub struct AudioSyncStartResult {
     pub entertainment_area_id: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioSyncPreview {
+    pub entertainment_area_id: String,
+    pub red: u8,
+    pub green: u8,
+    pub blue: u8,
+    pub intensity: f32,
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum AudioSyncSpeedMode {
@@ -197,6 +209,10 @@ pub enum AudioSyncColorPalette {
     Ocean,
     Rose,
     Mono,
+    NeonPulse,
+    Prism,
+    VocalGlow,
+    FireIce,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -539,6 +555,10 @@ pub(crate) struct RawEntertainmentArea {
     pub status: RawEntertainmentAreaStatus,
     #[serde(default)]
     pub channels: Vec<RawEntertainmentChannel>,
+    #[serde(default)]
+    pub light_services: Vec<RawClipV2ResourceServiceIdentifier>,
+    #[serde(default)]
+    pub locations: HashMap<String, Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -575,6 +595,25 @@ impl RawEntertainmentAreaStatus {
 pub(crate) struct RawEntertainmentChannel {
     pub channel_id: u8,
     pub position: RawEntertainmentPosition,
+    #[serde(default)]
+    pub members: Vec<RawEntertainmentChannelMember>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawEntertainmentChannelMember {
+    #[serde(default)]
+    pub service: Option<RawClipV2ResourceServiceIdentifier>,
+    #[serde(default)]
+    pub rid: Option<String>,
+    #[serde(default)]
+    pub rtype: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RawClipV2ResourceServiceIdentifier {
+    pub rid: String,
+    #[serde(default)]
+    pub rtype: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -620,6 +659,22 @@ impl From<RawAutomation> for Automation {
 
 impl From<RawEntertainmentArea> for EntertainmentArea {
     fn from(raw: RawEntertainmentArea) -> Self {
+        let mut light_ids = raw
+            .channels
+            .iter()
+            .flat_map(|channel| channel.members.iter())
+            .filter_map(RawEntertainmentChannelMember::candidate_service_rid)
+            .collect::<Vec<_>>();
+        light_ids.extend(
+            raw.light_services
+                .iter()
+                .filter(|service| !is_excluded_member_service_type(service.rtype.as_deref()))
+                .map(|service| service.rid.clone()),
+        );
+        light_ids.extend(raw.locations.keys().cloned());
+        light_ids.sort();
+        light_ids.dedup();
+
         Self {
             id: raw.id,
             name: raw.metadata.name,
@@ -630,8 +685,31 @@ impl From<RawEntertainmentArea> for EntertainmentArea {
                 .into_iter()
                 .map(EntertainmentChannel::from)
                 .collect(),
+            light_ids,
         }
     }
+}
+
+impl RawEntertainmentChannelMember {
+    fn candidate_service_rid(&self) -> Option<String> {
+        if let Some(service) = self.service.as_ref() {
+            if !is_excluded_member_service_type(service.rtype.as_deref())
+                && !service.rid.trim().is_empty()
+            {
+                return Some(service.rid.trim().to_string());
+            }
+        }
+
+        let rid = self.rid.as_deref()?.trim();
+        if rid.is_empty() || is_excluded_member_service_type(self.rtype.as_deref()) {
+            return None;
+        }
+        Some(rid.to_string())
+    }
+}
+
+fn is_excluded_member_service_type(rtype: Option<&str>) -> bool {
+    rtype.is_some_and(|rtype| rtype.eq_ignore_ascii_case("device"))
 }
 
 impl From<RawEntertainmentChannel> for EntertainmentChannel {
@@ -700,9 +778,10 @@ fn sensor_summary(state: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Automation, ClipV2ListResponse, CreateUserSuccessPayload, Group, GroupKind, HueApiResponse,
-        HueLightStatePayload, Light, LightStateUpdate, RawAutomation, RawGroupsResponse,
-        RawLightsResponse, RawScenesResponse, RawSensorsResponse, Scene, Sensor,
+        Automation, ClipV2ListResponse, CreateUserSuccessPayload, EntertainmentArea, Group,
+        GroupKind, HueApiResponse, HueLightStatePayload, Light, LightStateUpdate, RawAutomation,
+        RawEntertainmentArea, RawGroupsResponse, RawLightsResponse, RawScenesResponse,
+        RawSensorsResponse, Scene, Sensor,
     };
 
     #[test]
@@ -894,5 +973,77 @@ mod tests {
         );
         assert_eq!(automations[0].script_id.as_deref(), Some("script-1"));
         assert_eq!(automations[1].enabled, None);
+    }
+
+    #[test]
+    fn converts_entertainment_area_members_to_light_ids() {
+        let raw = r#"{
+            "data": [
+                {
+                    "id": "area-1",
+                    "metadata": { "name": "Lounge" },
+                    "configuration_type": "music",
+                    "status": "inactive",
+                    "channels": [
+                        {
+                            "channel_id": 1,
+                            "position": { "x": 0.0, "y": 0.0, "z": 0.0 },
+                            "members": [
+                                { "service": { "rid": "12", "rtype": "light" } },
+                                { "service": { "rid": "alpha", "rtype": "device" } }
+                            ]
+                        },
+                        {
+                            "channel_id": 2,
+                            "position": { "x": 1.0, "y": 0.0, "z": 0.0 },
+                            "members": [
+                                { "service": { "rid": "7", "rtype": "light" } },
+                                { "service": { "rid": "12", "rtype": "light" } }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }"#;
+
+        let response: ClipV2ListResponse<RawEntertainmentArea> = serde_json::from_str(raw).unwrap();
+        let area = EntertainmentArea::from(response.data.into_iter().next().unwrap());
+
+        assert_eq!(area.id, "area-1");
+        assert_eq!(area.channels.len(), 2);
+        assert_eq!(area.light_ids, vec!["12".to_string(), "7".to_string()]);
+    }
+
+    #[test]
+    fn converts_entertainment_area_light_services_and_locations_to_light_ids() {
+        let raw = r#"{
+            "data": [
+                {
+                    "id": "area-2",
+                    "metadata": { "name": "Whole house" },
+                    "channels": [],
+                    "light_services": [
+                        { "rid": "rid-1", "rtype": "entertainment" },
+                        { "rid": "rid-2", "rtype": "light" }
+                    ],
+                    "locations": {
+                        "rid-3": { "x": 0.0, "y": 0.0, "z": 0.0 }
+                    }
+                }
+            ]
+        }"#;
+
+        let response: ClipV2ListResponse<RawEntertainmentArea> = serde_json::from_str(raw).unwrap();
+        let area = EntertainmentArea::from(response.data.into_iter().next().unwrap());
+
+        assert_eq!(area.id, "area-2");
+        assert_eq!(
+            area.light_ids,
+            vec![
+                "rid-1".to_string(),
+                "rid-2".to_string(),
+                "rid-3".to_string()
+            ]
+        );
     }
 }

@@ -15,6 +15,7 @@
 // limitations under the License.
 
 use crate::app_state::{
+    AudioSyncPreferences, SaveRoomOrderRequest,
     clear_bridge_connection as state_clear_bridge_connection,
     clear_room_order as state_clear_room_order,
     load_audio_sync_preferences as state_load_audio_sync_preferences,
@@ -24,15 +25,14 @@ use crate::app_state::{
     save_audio_sync_preferences as state_save_audio_sync_preferences,
     save_bridge_connection as state_save_bridge_connection,
     save_ollama_settings as state_save_ollama_settings, save_room_order as state_save_room_order,
-    save_theme_preference as state_save_theme_preference, AudioSyncPreferences,
-    SaveRoomOrderRequest,
+    save_theme_preference as state_save_theme_preference,
 };
-use crate::audio::{capture, AudioSyncManager};
+use crate::audio::{AudioSyncManager, capture};
 use crate::hue::{
-    ActivateSceneRequest, AudioSyncStartRequest, AudioSyncStartResult, AudioSyncUpdateRequest,
-    Automation, AutomationDetail, BridgeConnection, CreateSceneRequest, CreateUserRequest,
-    DeleteSceneRequest, DiscoveredBridge, EntertainmentArea, Group, HueBridgeClient,
-    HueBridgeConfig, Light, PipeWireOutputTarget, RegisteredApp, Scene, Sensor,
+    ActivateSceneRequest, AudioSyncPreview, AudioSyncStartRequest, AudioSyncStartResult,
+    AudioSyncUpdateRequest, Automation, AutomationDetail, BridgeConnection, CreateSceneRequest,
+    CreateUserRequest, DeleteSceneRequest, DiscoveredBridge, EntertainmentArea, Group,
+    HueBridgeClient, HueBridgeConfig, Light, PipeWireOutputTarget, RegisteredApp, Scene, Sensor,
     SetAutomationEnabledRequest, SetLightStateRequest, UpdateAutomationRequest,
 };
 use crate::ollama::{
@@ -40,7 +40,7 @@ use crate::ollama::{
 };
 use crate::theme::ThemePreference;
 use tauri::{AppHandle, State};
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 #[tauri::command]
 pub async fn discover_hue_bridges() -> Result<Vec<DiscoveredBridge>, String> {
@@ -388,6 +388,13 @@ pub fn update_hue_audio_sync(
             brightness_ceiling,
         )
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn get_hue_audio_sync_preview(
+    audio_sync: State<'_, AudioSyncManager>,
+) -> Result<Option<AudioSyncPreview>, String> {
+    audio_sync.preview().map_err(|error| error.to_string())
 }
 
 #[tauri::command]

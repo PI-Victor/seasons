@@ -203,7 +203,7 @@ fn float_to_u16(value: f32) -> u16 {
 
 #[cfg(test)]
 mod tests {
-    use super::{encode_rgb_packet, EntertainmentChannelColor};
+    use super::{EntertainmentChannelColor, encode_rgb_packet};
 
     #[test]
     fn encodes_hue_stream_packet_header() {
