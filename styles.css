@@ -424,18 +424,50 @@ input {
   grid-template-columns: 1fr;
 }
 
-.home-workspace-grid > .audio-sync-panel,
-.home-workspace-grid > .command-panel {
+.home-workspace-grid > .home-jump-links,
+.home-workspace-grid > .home-anchor-section,
+.home-workspace-grid .audio-sync-panel,
+.home-workspace-grid .command-panel {
   grid-column: 1 / -1;
 }
 
-.home-workspace-grid > .audio-sync-panel[open],
-.home-workspace-grid > .command-panel[open] {
+.home-jump-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-start;
+  margin-top: 6px;
+}
+
+.home-jump-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.1rem;
+  padding: 0.4rem 0.82rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--pill-border) 72%, var(--line));
+  background: color-mix(in srgb, var(--pill-bg) 74%, var(--ghost-bg));
+  color: color-mix(in srgb, var(--text-soft) 88%, white 12%);
+  text-decoration: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.home-jump-link:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--amber) 22%, var(--pill-border));
+  background: color-mix(in srgb, var(--pill-bg) 56%, var(--ghost-bg));
+}
+
+.home-workspace-grid .light-grid {
   grid-column: 1 / -1;
 }
 
-.home-workspace-grid > .light-grid {
-  grid-column: 1 / -1;
+.home-anchor-section {
+  scroll-margin-top: 72px;
 }
 
 .main-column {
@@ -512,6 +544,15 @@ input {
 
 .compact-panel-header h2 {
   font-size: 1.55rem;
+}
+
+.light-panel-header h2 {
+  font-size: 1.35rem;
+}
+
+.audio-sync-panel .settings-header h2,
+.command-panel .settings-header h2 {
+  font-size: 1.2rem;
 }
 
 .ghost-button,
@@ -752,6 +793,16 @@ input {
   box-shadow: 0 0 0 10px color-mix(in srgb, var(--lime) 12%, transparent);
 }
 
+.connection-pulse-dot.is-offline {
+  background: var(--rose);
+  box-shadow: 0 0 0 10px color-mix(in srgb, var(--rose) 12%, transparent);
+}
+
+.connection-pulse-dot.is-checking {
+  background: var(--amber);
+  box-shadow: 0 0 0 10px color-mix(in srgb, var(--amber) 12%, transparent);
+}
+
 .audio-sync-summary {
   list-style: none;
   cursor: pointer;
@@ -820,84 +871,6 @@ input {
   display: grid;
   gap: 14px;
   padding-top: 10px;
-}
-
-.audio-sync-panel:not([open]),
-.command-panel:not([open]) {
-  padding: 0;
-  border-radius: 18px;
-  overflow: hidden;
-}
-
-.audio-sync-panel:not([open]) .settings-header,
-.command-panel:not([open]) .settings-header {
-  margin: 0;
-  align-items: center;
-  gap: 8px;
-  min-height: 0;
-  width: 100%;
-}
-
-.audio-sync-panel:not([open]) .panel-kicker,
-.command-panel:not([open]) .panel-kicker {
-  display: none;
-}
-
-.audio-sync-panel:not([open]) .settings-header h2,
-.command-panel:not([open]) .settings-header h2 {
-  font-size: 0.72rem;
-  line-height: 1;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--text-soft);
-  font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
-}
-
-.audio-sync-panel:not([open]) .audio-sync-summary-meta,
-.command-panel:not([open]) .audio-sync-summary-meta {
-  margin-left: auto;
-  gap: 5px;
-}
-
-.audio-sync-panel:not([open]) .connection-pulse {
-  min-height: auto;
-  padding: 0;
-  gap: 5px;
-  font-size: 0.68rem;
-}
-
-.audio-sync-panel:not([open]) .connection-pulse-dot {
-  width: 8px;
-  height: 8px;
-  box-shadow: 0 0 0 6px color-mix(in srgb, var(--lime) 10%, transparent);
-}
-
-.audio-sync-panel:not([open]) .audio-sync-summary-toggle,
-.command-panel:not([open]) .audio-sync-summary-toggle {
-  min-height: 1.2rem;
-  padding: 0.04rem 0.4rem;
-  font-size: 0.62rem;
-  letter-spacing: 0.03em;
-}
-
-.audio-sync-panel:not([open]) .audio-sync-summary,
-.command-panel:not([open]) .command-summary {
-  display: flex;
-  align-items: center;
-  min-height: 2.2rem;
-  padding: 0.34rem 0.72rem;
-}
-
-.audio-sync-panel:not([open]) .audio-sync-summary > *,
-.command-panel:not([open]) .command-summary > * {
-  width: 100%;
-}
-
-.audio-sync-panel:not([open]) .panel-copy,
-.audio-sync-panel:not([open]) .audio-sync-body,
-.command-panel:not([open]) .panel-copy,
-.command-panel:not([open]) .command-body {
-  display: none;
 }
 
 .bridge-subsection {
@@ -1159,6 +1132,7 @@ input {
   display: flex;
   align-items: center;
   gap: 10px;
+  margin-left: auto;
 }
 
 .entertainment-area-strip {
@@ -2514,6 +2488,11 @@ input {
   .device-actions {
     align-items: start;
     flex-direction: column;
+  }
+
+  .light-panel-header {
+    align-items: center;
+    flex-direction: row;
   }
 
   .room-strip-actions {

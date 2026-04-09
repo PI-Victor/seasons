@@ -21,6 +21,8 @@ use leptos::prelude::*;
 #[component]
 pub fn CommandPanel(
     active_connection: ReadSignal<Option<BridgeConnection>>,
+    ollama_connection_ok: ReadSignal<Option<bool>>,
+    is_checking_connection: ReadSignal<bool>,
     command_input: ReadSignal<String>,
     is_executing: ReadSignal<bool>,
     last_result: ReadSignal<Option<ExecuteOllamaCommandResult>>,
@@ -33,9 +35,33 @@ pub fn CommandPanel(
                 <div class="settings-header">
                     <div>
                         <p class="panel-kicker">"Command"</p>
-                        <h2>"Ollama-powered control"</h2>
+                        <h2>"AI control"</h2>
                     </div>
                     <div class="audio-sync-summary-meta">
+                        <div class="connection-pulse">
+                            <span
+                                class=move || {
+                                    if is_checking_connection.get() {
+                                        "connection-pulse-dot is-checking"
+                                    } else if ollama_connection_ok.get().unwrap_or(false) {
+                                        "connection-pulse-dot"
+                                    } else {
+                                        "connection-pulse-dot is-offline"
+                                    }
+                                }
+                            ></span>
+                            <span>
+                                {move || {
+                                    if is_checking_connection.get() {
+                                        "Checking AI".to_string()
+                                    } else if ollama_connection_ok.get().unwrap_or(false) {
+                                        "AI online".to_string()
+                                    } else {
+                                        "AI offline".to_string()
+                                    }
+                                }}
+                            </span>
+                        </div>
                         <span class="audio-sync-summary-toggle">"Open"</span>
                     </div>
                 </div>

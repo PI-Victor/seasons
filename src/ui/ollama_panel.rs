@@ -21,6 +21,8 @@ use leptos::prelude::*;
 pub fn OllamaPanel(
     settings: ReadSignal<OllamaSettings>,
     is_saving: ReadSignal<bool>,
+    ollama_connection_ok: ReadSignal<Option<bool>>,
+    is_checking_connection: ReadSignal<bool>,
     on_base_url_input: Callback<String>,
     on_model_input: Callback<String>,
     on_api_key_input: Callback<String>,
@@ -98,6 +100,31 @@ pub fn OllamaPanel(
                         }
                     }}
                 </button>
+            </div>
+
+            <div class="connection-pulse">
+                <span
+                    class=move || {
+                        if is_checking_connection.get() {
+                            "connection-pulse-dot is-checking"
+                        } else if ollama_connection_ok.get().unwrap_or(false) {
+                            "connection-pulse-dot"
+                        } else {
+                            "connection-pulse-dot is-offline"
+                        }
+                    }
+                ></span>
+                <span>
+                    {move || {
+                        if is_checking_connection.get() {
+                            "Checking AI connectivity".to_string()
+                        } else if ollama_connection_ok.get().unwrap_or(false) {
+                            "AI endpoint is reachable".to_string()
+                        } else {
+                            "AI endpoint is unreachable".to_string()
+                        }
+                    }}
+                </span>
             </div>
         </section>
     }

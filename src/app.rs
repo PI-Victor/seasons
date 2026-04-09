@@ -121,6 +121,8 @@ pub fn App() -> impl IntoView {
     let (theme_preference, set_theme_preference) = signal(ThemePreference::default());
     let (ollama_settings, set_ollama_settings) = signal(OllamaSettings::default());
     let (is_saving_ollama_settings, set_is_saving_ollama_settings) = signal(false);
+    let (is_checking_ollama_connection, set_is_checking_ollama_connection) = signal(false);
+    let (ollama_connection_ok, set_ollama_connection_ok) = signal(None::<bool>);
     let (ollama_command_input, set_ollama_command_input) = signal(String::new());
     let (is_running_ollama_command, set_is_running_ollama_command) = signal(false);
     let (ollama_result, set_ollama_result) = signal(None::<ExecuteOllamaCommandResult>);
@@ -452,7 +454,15 @@ pub fn App() -> impl IntoView {
         set_did_restore_ollama_settings.set(true);
         spawn_local(async move {
             match ollama::load_ollama_settings().await {
-                Ok(settings) => set_ollama_settings.set(settings),
+                Ok(settings) => {
+                    set_ollama_settings.set(settings.clone());
+                    set_is_checking_ollama_connection.set(true);
+                    match ollama::probe_ollama_connection(&settings).await {
+                        Ok(()) => set_ollama_connection_ok.set(Some(true)),
+                        Err(_) => set_ollama_connection_ok.set(Some(false)),
+                    }
+                    set_is_checking_ollama_connection.set(false);
+                }
                 Err(error) => {
                     set_notice.set(Some(UiNotice::warning(
                         "Could not restore Ollama settings",
@@ -837,6 +847,19 @@ pub fn App() -> impl IntoView {
         }
     });
 
+    let probe_ollama_connectivity = Callback::new({
+        move |settings: OllamaSettings| {
+            set_is_checking_ollama_connection.set(true);
+            spawn_local(async move {
+                match ollama::probe_ollama_connection(&settings).await {
+                    Ok(()) => set_ollama_connection_ok.set(Some(true)),
+                    Err(_) => set_ollama_connection_ok.set(Some(false)),
+                }
+                set_is_checking_ollama_connection.set(false);
+            });
+        }
+    });
+
     let save_ollama_configuration = Callback::new({
         move |()| {
             let settings = ollama_settings.get_untracked();
@@ -859,6 +882,7 @@ pub fn App() -> impl IntoView {
             spawn_local(async move {
                 match ollama::save_ollama_settings(&settings).await {
                     Ok(()) => {
+                        probe_ollama_connectivity.run(settings.clone());
                         set_notice.set(Some(UiNotice::success(
                             "Ollama settings saved",
                             "Command routing now targets the selected Ollama endpoint and model.",
@@ -909,6 +933,7 @@ pub fn App() -> impl IntoView {
 
                 match ollama::execute_ollama_command(request).await {
                     Ok(result) => {
+                        set_ollama_connection_ok.set(Some(true));
                         let execution_connection = result
                             .updated_connection
                             .clone()
@@ -996,6 +1021,9 @@ pub fn App() -> impl IntoView {
                         }
                     }
                     Err(error) => {
+                        if is_ollama_connectivity_error(&error) {
+                            set_ollama_connection_ok.set(Some(false));
+                        }
                         set_notice.set(Some(UiNotice::error("Command execution failed", error)));
                     }
                 }
@@ -2211,7 +2239,10 @@ pub fn App() -> impl IntoView {
                 .to_ascii_lowercase()
                 .contains("temperature");
             if is_temperature {
-                sensor.summary.clone()
+                sensor
+                    .summary
+                    .clone()
+                    .map(|summary| format!("{} {}", sensor.name, summary))
             } else {
                 None
             }
@@ -2237,12 +2268,12 @@ pub fn App() -> impl IntoView {
                         {move || {
                             active_connection
                                 .get()
-                                .map(|connection| connection.bridge_ip)
-                                .unwrap_or_else(|| "Offline".to_string())
+                                .map(|connection| format!("Bridge IP {}", connection.bridge_ip))
+                                .unwrap_or_else(|| "Bridge offline".to_string())
                         }}
                     </span>
-                    <span class="overview-pill">{move || format!("{} on", active_light_count.get())}</span>
-                    <span class="overview-pill">{move || format!("{} reachable", reachable_light_count.get())}</span>
+                    <span class="overview-pill">{move || format!("Lights on {}", active_light_count.get())}</span>
+                    <span class="overview-pill">{move || format!("Reachable lights {}", reachable_light_count.get())}</span>
                     {move || {
                         temperature_summary
                             .get()
@@ -2292,6 +2323,8 @@ pub fn App() -> impl IntoView {
                             <OllamaPanel
                                 settings=ollama_settings
                                 is_saving=is_saving_ollama_settings
+                                ollama_connection_ok=ollama_connection_ok
+                                is_checking_connection=is_checking_ollama_connection
                                 on_base_url_input=set_ollama_base_url
                                 on_model_input=set_ollama_model
                                 on_api_key_input=set_ollama_api_key
@@ -2328,34 +2361,10 @@ pub fn App() -> impl IntoView {
                 } else {
                     view! {
                         <section class="workspace-grid home-workspace-grid">
-                            <AudioSyncPanel
-                                active_connection=active_connection
-                                entertainment_areas=entertainment_areas
-                                selected_entertainment_area_id=selected_entertainment_area_id
-                                pipewire_targets=pipewire_targets
-                                selected_pipewire_target_object=selected_pipewire_target_object
-                                selected_sync_speed_mode=selected_sync_speed_mode
-                                selected_sync_color_palette=selected_sync_color_palette
-                                is_loading_areas=is_loading_entertainment_areas
-                                is_loading_pipewire_targets=is_loading_pipewire_targets
-                                is_audio_syncing=is_audio_syncing
-                                is_audio_sync_starting=is_audio_sync_starting
-                                on_select_area=select_entertainment_area
-                                on_select_pipewire_target=select_pipewire_target
-                                on_select_sync_speed_mode=select_sync_speed_mode
-                                on_select_sync_color_palette=select_sync_color_palette
-                                on_start=start_audio_sync
-                                on_stop=stop_audio_sync
-                            />
-
-                            <CommandPanel
-                                active_connection=active_connection
-                                command_input=ollama_command_input
-                                is_executing=is_running_ollama_command
-                                last_result=ollama_result
-                                on_input=Callback::new(move |value: String| set_ollama_command_input.set(value))
-                                on_execute=execute_ollama_instruction
-                            />
+                            <section class="home-jump-links">
+                                <a class="home-jump-link" href="#audio-sync-section">"Audio sync"</a>
+                                <a class="home-jump-link" href="#ai-control-section">"AI control"</a>
+                            </section>
 
                             <LightGrid
                                 lights=lights
@@ -2381,6 +2390,41 @@ pub fn App() -> impl IntoView {
                                 on_create_custom_scene=create_custom_room_scene
                                 on_reorder_rooms=reorder_rooms
                             />
+
+                            <div id="audio-sync-section" class="home-anchor-section">
+                                <AudioSyncPanel
+                                    active_connection=active_connection
+                                    entertainment_areas=entertainment_areas
+                                    selected_entertainment_area_id=selected_entertainment_area_id
+                                    pipewire_targets=pipewire_targets
+                                    selected_pipewire_target_object=selected_pipewire_target_object
+                                    selected_sync_speed_mode=selected_sync_speed_mode
+                                    selected_sync_color_palette=selected_sync_color_palette
+                                    is_loading_areas=is_loading_entertainment_areas
+                                    is_loading_pipewire_targets=is_loading_pipewire_targets
+                                    is_audio_syncing=is_audio_syncing
+                                    is_audio_sync_starting=is_audio_sync_starting
+                                    on_select_area=select_entertainment_area
+                                    on_select_pipewire_target=select_pipewire_target
+                                    on_select_sync_speed_mode=select_sync_speed_mode
+                                    on_select_sync_color_palette=select_sync_color_palette
+                                    on_start=start_audio_sync
+                                    on_stop=stop_audio_sync
+                                />
+                            </div>
+
+                            <div id="ai-control-section" class="home-anchor-section">
+                                <CommandPanel
+                                    active_connection=active_connection
+                                    ollama_connection_ok=ollama_connection_ok
+                                    is_checking_connection=is_checking_ollama_connection
+                                    command_input=ollama_command_input
+                                    is_executing=is_running_ollama_command
+                                    last_result=ollama_result
+                                    on_input=Callback::new(move |value: String| set_ollama_command_input.set(value))
+                                    on_execute=execute_ollama_instruction
+                                />
+                            </div>
                         </section>
                     }.into_any()
                 }
@@ -3068,4 +3112,12 @@ fn pluralize(count: usize) -> &'static str {
     } else {
         "s"
     }
+}
+
+fn is_ollama_connectivity_error(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    normalized.contains("failed to contact ollama")
+        || normalized.contains("failed to read ollama response")
+        || normalized.contains("ollama returned http")
+        || normalized.contains("ollama base url is required")
 }
