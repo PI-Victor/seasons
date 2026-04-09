@@ -40,6 +40,8 @@ The main page is room-first. Each room stays compact until you open it, then sho
 
 The room header is meant to be the fast control surface: you can toggle the room, set brightness, then open it only when you need scenes or individual devices.
 
+When a room is expanded, Seasons surfaces the full scene strip, scene creation actions, and per-light controls in the same panel so you can stay in the room context while making finer changes.
+
 <img src="assets/Seasons-lights.png" alt="Expanded room view" width="70%" />
 
 ### Entertainment zones
