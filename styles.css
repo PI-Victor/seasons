@@ -946,6 +946,42 @@ input {
     var(--room-shell-bg);
 }
 
+.room-card.is-audio-sync-flashing {
+  border-color: color-mix(
+    in srgb,
+    var(--sync-flash-color, var(--bridge-accent)) var(--sync-flash-border-alpha, 22%),
+    var(--room-shell-border)
+  );
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(
+        in srgb,
+        var(--sync-flash-color, var(--bridge-accent)) var(--sync-flash-top-alpha, 16%),
+        transparent
+      ),
+      color-mix(
+        in srgb,
+        var(--sync-flash-color, var(--bridge-accent)) var(--sync-flash-mid-alpha, 8%),
+        transparent
+      ) 38%,
+      transparent 72%
+    ),
+    var(--room-shell-bg);
+  box-shadow:
+    0 0 0 1px color-mix(
+      in srgb,
+      var(--sync-flash-color, var(--bridge-accent)) var(--sync-flash-ring-alpha, 12%),
+      transparent
+    ),
+    0 12px 22px color-mix(
+      in srgb,
+      var(--sync-flash-color, var(--bridge-accent)) var(--sync-flash-glow-alpha, 18%),
+      transparent
+    );
+  transition: border-color 90ms linear, background 90ms linear, box-shadow 90ms linear;
+}
+
 :root[data-color-scheme="light"] .room-card {
   background:
     linear-gradient(
@@ -1133,6 +1169,10 @@ input {
   align-items: center;
   gap: 10px;
   margin-left: auto;
+}
+
+.zone-panel-header {
+  margin-top: 14px;
 }
 
 .entertainment-area-strip {

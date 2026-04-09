@@ -15,11 +15,11 @@
 // limitations under the License.
 
 use crate::hue::models::{
-    ActivateSceneRequest, AudioSyncStartRequest, AudioSyncStartResult, AudioSyncUpdateRequest,
-    Automation, AutomationDetail, BridgeConnection, CreateSceneRequest, CreateUserRequest,
-    DeleteSceneRequest, DiscoveredBridge, EntertainmentArea, Group, Light, PipeWireOutputTarget,
-    RegisteredApp, Scene, Sensor, SetAutomationEnabledRequest, SetLightStateRequest,
-    UpdateAutomationRequest,
+    ActivateSceneRequest, AudioSyncPreview, AudioSyncStartRequest, AudioSyncStartResult,
+    AudioSyncUpdateRequest, Automation, AutomationDetail, BridgeConnection, CreateSceneRequest,
+    CreateUserRequest, DeleteSceneRequest, DiscoveredBridge, EntertainmentArea, Group, Light,
+    PipeWireOutputTarget, RegisteredApp, Scene, Sensor, SetAutomationEnabledRequest,
+    SetLightStateRequest, UpdateAutomationRequest,
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -136,6 +136,10 @@ pub async fn stop_hue_audio_sync() -> Result<(), String> {
 
 pub async fn update_hue_audio_sync(request: AudioSyncUpdateRequest) -> Result<(), String> {
     invoke_with_named_args("update_hue_audio_sync", &[("request", &request)]).await
+}
+
+pub async fn get_hue_audio_sync_preview() -> Result<Option<AudioSyncPreview>, String> {
+    invoke_without_args("get_hue_audio_sync_preview").await
 }
 
 async fn invoke_without_args<T>(cmd: &str) -> Result<T, String>

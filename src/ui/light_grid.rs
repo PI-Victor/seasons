@@ -16,7 +16,8 @@
 
 use super::{DeviceGrid, SceneComposer, SceneComposerRequest};
 use crate::hue::{
-    ActivateSceneRequest, BridgeConnection, DeleteSceneRequest, Group, GroupKind, Light, Scene,
+    ActivateSceneRequest, AudioSyncPreview, BridgeConnection, DeleteSceneRequest,
+    EntertainmentArea, Group, GroupKind, Light, Scene,
 };
 use leptos::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -26,18 +27,23 @@ pub fn LightGrid(
     lights: ReadSignal<Vec<Light>>,
     groups: ReadSignal<Vec<Group>>,
     scenes: ReadSignal<Vec<Scene>>,
+    entertainment_areas: ReadSignal<Vec<EntertainmentArea>>,
     room_order: ReadSignal<Vec<String>>,
     pending_scene_id: ReadSignal<Option<String>>,
     pending_room_ids: ReadSignal<HashSet<String>>,
     pending_room_control_ids: ReadSignal<HashSet<String>>,
     pending_light_ids: ReadSignal<HashSet<String>>,
     active_scene_by_group: ReadSignal<HashMap<String, String>>,
+    audio_sync_preview: ReadSignal<Option<AudioSyncPreview>>,
+    syncing_room_ids: Signal<HashSet<String>>,
     active_connection: ReadSignal<Option<BridgeConnection>>,
     is_refreshing: ReadSignal<bool>,
     on_open_settings: Callback<()>,
     on_toggle_all_lights: Callback<()>,
     on_toggle_room: Callback<String>,
     on_set_room_brightness: Callback<(String, u8)>,
+    on_toggle_entertainment_area: Callback<String>,
+    on_set_entertainment_area_brightness: Callback<(String, u8)>,
     on_toggle_light: Callback<String>,
     on_set_light_brightness: Callback<(String, u8)>,
     on_activate_scene: Callback<ActivateSceneRequest>,
@@ -131,6 +137,11 @@ pub fn LightGrid(
                         build_room_sections(&lights.get(), &groups.get(), &scenes.get()),
                         &room_order.get(),
                     );
+                    let zone_sections = build_zone_sections(
+                        &entertainment_areas.get(),
+                        &groups.get(),
+                        &lights.get(),
+                    );
                     let ordered_room_ids = room_sections
                         .iter()
                         .map(|room| room.id.clone())
@@ -156,12 +167,19 @@ pub fn LightGrid(
                                     } else {
                                         "room-card"
                                     };
-                                    let room_style = room_accent_style(&room.lights)
-                                        .unwrap_or_default();
+                                    let sync_preview = audio_sync_preview.get();
+                                    let is_sync_target = syncing_room_ids.get().contains(&room_id);
+                                    let sync_style = room_sync_flash_style(sync_preview.as_ref(), is_sync_target);
+                                    let room_style = merge_style_fragments(
+                                        room_accent_style(&room.lights).as_deref(),
+                                        sync_style.as_deref(),
+                                    );
                                     let room_drag_class = if drop_target_room_id.get().as_deref()
                                         == Some(room_id.as_str())
                                     {
                                         format!("{room_card_class} is-drop-target")
+                                    } else if is_sync_target && sync_preview.is_some() {
+                                        format!("{room_card_class} is-audio-sync-flashing")
                                     } else {
                                         room_card_class.to_string()
                                     };
@@ -466,6 +484,146 @@ pub fn LightGrid(
                                 })
                                 .collect_view()}
                         </div>
+                        {if zone_sections.is_empty() {
+                            ().into_any()
+                        } else {
+                            view! {
+                                <div class="panel-header compact-panel-header light-panel-header zone-panel-header">
+                                    <div>
+                                        <p class="panel-kicker">"Zones"</p>
+                                        <h2>"Entertainment zones"</h2>
+                                    </div>
+                                </div>
+                                <div class="room-grid zone-grid">
+                                    {zone_sections
+                                        .into_iter()
+                                        .map(|zone| {
+                                            let zone_id = zone.id.clone();
+                                            let zone_name = zone.name.clone();
+                                            let zone_status = zone.status.clone();
+                                            let zone_light_count = zone.lights.len();
+                                            let zone_active_count = zone.active_light_count;
+                                            let zone_is_on = zone_active_count > 0;
+                                            let zone_average_brightness = zone.average_brightness;
+                                            let zone_brightness_label = brightness_label(zone_average_brightness);
+                                            let zone_slider_value = zone_average_brightness.max(1);
+                                            let zone_card_class = if zone_active_count > 0 {
+                                                "room-card is-active"
+                                            } else {
+                                                "room-card"
+                                            };
+                                            let sync_preview = audio_sync_preview.get();
+                                            let is_sync_target = sync_preview
+                                                .as_ref()
+                                                .is_some_and(|preview| preview.entertainment_area_id == zone_id);
+                                            let sync_style = room_sync_flash_style(
+                                                sync_preview.as_ref(),
+                                                is_sync_target,
+                                            );
+                                            let zone_style = merge_style_fragments(
+                                                room_accent_style(&zone.lights).as_deref(),
+                                                sync_style.as_deref(),
+                                            );
+                                            let zone_drag_class = if is_sync_target
+                                                && sync_preview.is_some()
+                                            {
+                                                format!("{zone_card_class} is-audio-sync-flashing")
+                                            } else {
+                                                zone_card_class.to_string()
+                                            };
+                                            let toggle_zone_id = zone_id.clone();
+                                            let slider_zone_id = zone_id.clone();
+                                            let is_updating_zone = pending_room_control_ids.get().contains(&zone_id);
+
+                                            view! {
+                                                <details class=zone_drag_class style=zone_style>
+                                                    <summary class="room-card-summary">
+                                                        <div class="room-card-header">
+                                                            <div class="room-summary-main">
+                                                                <span class="room-summary-dot"></span>
+                                                                <div class="room-summary-copy">
+                                                                    <h3>{zone_name}</h3>
+                                                                    <p>
+                                                                        {format!("{zone_light_count} devices · zone")}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                            <div class="room-card-tools">
+                                                                <div class="room-meta">
+                                                                    <span>{format!("{zone_active_count} on")}</span>
+                                                                    <span>{zone_brightness_label.clone()}</span>
+                                                                </div>
+                                                                <button
+                                                                    class=move || {
+                                                                        if zone_is_on {
+                                                                            "room-summary-switch is-on"
+                                                                        } else {
+                                                                            "room-summary-switch"
+                                                                        }
+                                                                    }
+                                                                    disabled=is_updating_zone
+                                                                    on:click=move |ev| {
+                                                                        ev.prevent_default();
+                                                                        ev.stop_propagation();
+                                                                        on_toggle_entertainment_area.run(toggle_zone_id.clone());
+                                                                    }
+                                                                >
+                                                                    <span class="room-summary-switch-track">
+                                                                        <span class="room-summary-switch-thumb"></span>
+                                                                    </span>
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                        <div
+                                                            class="room-level-slider-shell summary-level-bar"
+                                                            on:mousedown=move |ev| {
+                                                                ev.stop_propagation();
+                                                            }
+                                                            on:click=move |ev| {
+                                                                ev.stop_propagation();
+                                                            }
+                                                        >
+                                                            <span class="room-level-bar">
+                                                                <span
+                                                                    class="room-level-fill"
+                                                                    style=format!("width: {};", zone_brightness_label)
+                                                                ></span>
+                                                            </span>
+                                                            <input
+                                                                class="room-level-slider room-level-slider-overlay"
+                                                                type="range"
+                                                                min="1"
+                                                                max="254"
+                                                                value=zone_slider_value.to_string()
+                                                                disabled=is_updating_zone
+                                                                on:change=move |ev| {
+                                                                    ev.stop_propagation();
+                                                                    if let Ok(value) = event_target_value(&ev).parse::<u8>() {
+                                                                        on_set_entertainment_area_brightness.run((slider_zone_id.clone(), value));
+                                                                    }
+                                                                }
+                                                            />
+                                                        </div>
+                                                    </summary>
+                                                    <div class="room-card-body">
+                                                        <span class="room-strip-muted">{format!("Status: {zone_status}")}</span>
+                                                        <span class="room-strip-label">"Lights"</span>
+                                                        <DeviceGrid
+                                                            lights=zone.lights
+                                                            groups=groups.get()
+                                                            pending_light_ids=pending_light_ids
+                                                            on_toggle_light=on_toggle_light
+                                                            on_set_light_brightness=on_set_light_brightness
+                                                        />
+                                                    </div>
+                                                </details>
+                                            }
+                                        })
+                                        .collect_view()}
+                                </div>
+                            }
+                                .into_any()
+                        }}
                     }
                     .into_any()
                 }
@@ -483,6 +641,16 @@ struct RoomSection {
     average_brightness: u8,
     lights: Vec<Light>,
     scenes: Vec<Scene>,
+}
+
+#[derive(Clone, PartialEq)]
+struct ZoneSection {
+    id: String,
+    name: String,
+    status: String,
+    active_light_count: usize,
+    average_brightness: u8,
+    lights: Vec<Light>,
 }
 
 fn build_room_sections(lights: &[Light], groups: &[Group], scenes: &[Scene]) -> Vec<RoomSection> {
@@ -562,6 +730,116 @@ fn build_room_sections(lights: &[Light], groups: &[Group], scenes: &[Scene]) -> 
     }
 
     sections
+}
+
+fn build_zone_sections(
+    entertainment_areas: &[EntertainmentArea],
+    groups: &[Group],
+    lights: &[Light],
+) -> Vec<ZoneSection> {
+    let mut zones = entertainment_areas
+        .iter()
+        .map(|area| {
+            let mut zone_lights = lights_for_entertainment_area(area, groups, lights);
+            zone_lights.sort_by(|left, right| left.name.cmp(&right.name));
+
+            let active_light_count = zone_lights
+                .iter()
+                .filter(|light| light.is_on.unwrap_or(false))
+                .count();
+            let average_brightness = if zone_lights.is_empty() {
+                0
+            } else {
+                let total_brightness: u32 = zone_lights
+                    .iter()
+                    .map(|light| u32::from(light.brightness.unwrap_or(0)))
+                    .sum();
+                (total_brightness / zone_lights.len() as u32) as u8
+            };
+
+            ZoneSection {
+                id: area.id.clone(),
+                name: area.name.clone(),
+                status: area.status.clone(),
+                active_light_count,
+                average_brightness,
+                lights: zone_lights,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    zones.sort_by(|left, right| left.name.cmp(&right.name));
+    zones
+}
+
+fn lights_for_entertainment_area(
+    area: &EntertainmentArea,
+    groups: &[Group],
+    lights: &[Light],
+) -> Vec<Light> {
+    let light_ids = if area.light_ids.is_empty() {
+        best_matching_entertainment_group(area, groups)
+            .map(|group| group.light_ids.iter().cloned().collect::<HashSet<_>>())
+            .unwrap_or_default()
+    } else {
+        area.light_ids.iter().cloned().collect::<HashSet<_>>()
+    };
+
+    lights
+        .iter()
+        .filter(|light| light_ids.contains(&light.id))
+        .cloned()
+        .collect::<Vec<_>>()
+}
+
+fn best_matching_entertainment_group<'a>(
+    area: &EntertainmentArea,
+    groups: &'a [Group],
+) -> Option<&'a Group> {
+    let area_name = normalize_area_name(&area.name);
+    let mut best: Option<(&Group, usize)> = None;
+
+    for group in groups.iter().filter(|group| {
+        matches!(group.kind, GroupKind::Room | GroupKind::Zone) && !group.light_ids.is_empty()
+    }) {
+        let group_name = normalize_area_name(&group.name);
+        let score = if area_name == group_name {
+            100
+        } else if area_name.contains(&group_name) || group_name.contains(&area_name) {
+            75
+        } else {
+            let overlap = shared_token_count(&area_name, &group_name);
+            if overlap == 0 {
+                continue;
+            }
+            overlap * 10
+        };
+
+        match best {
+            Some((_, best_score)) if best_score >= score => {}
+            _ => best = Some((group, score)),
+        }
+    }
+
+    best.map(|(group, _)| group)
+}
+
+fn normalize_area_name(name: &str) -> String {
+    name.to_lowercase()
+        .replace("entertainment", "")
+        .replace("area", "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string()
+}
+
+fn shared_token_count(left: &str, right: &str) -> usize {
+    let right_tokens = right.split_whitespace().collect::<HashSet<_>>();
+    left.split_whitespace()
+        .filter(|token| right_tokens.contains(token))
+        .count()
 }
 
 fn apply_room_order(mut sections: Vec<RoomSection>, saved_order: &[String]) -> Vec<RoomSection> {
@@ -649,6 +927,40 @@ fn scene_preview_style(scene: &Scene) -> String {
 
 fn room_accent_style(lights: &[Light]) -> Option<String> {
     average_accent_color(lights).map(|color| format!("--bridge-accent: {color};"))
+}
+
+fn room_sync_flash_style(
+    preview: Option<&AudioSyncPreview>,
+    is_sync_target: bool,
+) -> Option<String> {
+    if !is_sync_target {
+        return None;
+    }
+    let preview = preview?;
+    let intensity = preview.intensity.clamp(0.0, 1.0);
+    if intensity <= 0.01 {
+        return None;
+    }
+
+    let border = (14.0 + intensity * 34.0).round();
+    let top = (8.0 + intensity * 30.0).round();
+    let mid = (4.0 + intensity * 16.0).round();
+    let glow = (10.0 + intensity * 34.0).round();
+    let ring = (8.0 + intensity * 24.0).round();
+
+    Some(format!(
+        "--sync-flash-color: rgb({} {} {}); --sync-flash-border-alpha: {border:.0}%; --sync-flash-top-alpha: {top:.0}%; --sync-flash-mid-alpha: {mid:.0}%; --sync-flash-glow-alpha: {glow:.0}%; --sync-flash-ring-alpha: {ring:.0}%;",
+        preview.red, preview.green, preview.blue
+    ))
+}
+
+fn merge_style_fragments(primary: Option<&str>, secondary: Option<&str>) -> String {
+    match (primary, secondary) {
+        (Some(primary), Some(secondary)) => format!("{primary} {secondary}"),
+        (Some(primary), None) => primary.to_string(),
+        (None, Some(secondary)) => secondary.to_string(),
+        (None, None) => String::new(),
+    }
 }
 
 fn average_accent_color(lights: &[Light]) -> Option<String> {
@@ -877,7 +1189,7 @@ fn hashed_scene_variation(name: &str) -> SceneTone {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_room_order, reorder_room_ids, RoomSection};
+    use super::{RoomSection, apply_room_order, reorder_room_ids};
 
     #[test]
     fn reorder_room_ids_moves_source_into_target_position_when_moving_up() {

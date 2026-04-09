@@ -16,26 +16,27 @@
 
 use crate::desktop;
 use crate::hue::{
-    self, curated_room_scenes, preset_light_state, ActivateSceneRequest, AudioSyncColorPalette,
-    AudioSyncSpeedMode, AudioSyncStartRequest, AudioSyncUpdateRequest, Automation,
-    AutomationConfigValue, BridgeConnection, CreateSceneRequest, CreateUserRequest,
-    DeleteSceneRequest, EntertainmentArea, Group, GroupKind, Light, LightStateUpdate,
-    PipeWireOutputTarget, Scene, Sensor, SetAutomationEnabledRequest, SetLightStateRequest,
-    UpdateAutomationRequest,
+    self, ActivateSceneRequest, AudioSyncColorPalette, AudioSyncSpeedMode, AudioSyncStartRequest,
+    AudioSyncUpdateRequest, Automation, AutomationConfigValue, BridgeConnection,
+    CreateSceneRequest, CreateUserRequest, DeleteSceneRequest, EntertainmentArea, Group, GroupKind,
+    Light, LightStateUpdate, PipeWireOutputTarget, Scene, Sensor, SetAutomationEnabledRequest,
+    SetLightStateRequest, UpdateAutomationRequest, curated_room_scenes, preset_light_state,
 };
 use crate::ollama::{
     self, ExecuteOllamaCommandRequest, ExecuteOllamaCommandResult, OllamaSettings,
 };
 use crate::storage::{self, AudioSyncPreferences};
-use crate::theme::{apply_theme_preference, ThemeMode, ThemePalette, ThemePreference};
+use crate::theme::{ThemeMode, ThemePalette, ThemePreference, apply_theme_preference};
 use crate::ui::{
     AudioSyncPanel, AutomationPanel, BridgePanel, CommandPanel, DevicePanel, LightGrid, NoticeTone,
     NotificationsPanel, OllamaPanel, SceneComposerRequest, ThemePanel, UiNotice, UiToast,
 };
 use leptos::prelude::*;
 use leptos::task::spawn_local;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
-use wasm_bindgen::{closure::Closure, JsCast};
+use std::rc::Rc;
+use wasm_bindgen::{JsCast, closure::Closure};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AppPage {
@@ -126,6 +127,10 @@ pub fn App() -> impl IntoView {
     let (ollama_command_input, set_ollama_command_input) = signal(String::new());
     let (is_running_ollama_command, set_is_running_ollama_command) = signal(false);
     let (ollama_result, set_ollama_result) = signal(None::<ExecuteOllamaCommandResult>);
+    let (audio_sync_preview, set_audio_sync_preview) = signal(None::<hue::AudioSyncPreview>);
+    let audio_sync_preview_interval_id = Rc::new(Cell::new(None::<i32>));
+    let audio_sync_preview_interval_closure: Rc<RefCell<Option<Closure<dyn FnMut()>>>> =
+        Rc::new(RefCell::new(None));
 
     Effect::new(move |_| {
         if let Some(current_notice) = notice.get() {
@@ -137,11 +142,7 @@ pub fn App() -> impl IntoView {
             };
 
             set_notifications.update(|items| {
-                if items
-                    .first()
-                    .map(|item| &item.notice)
-                    == Some(&current_notice)
-                {
+                if items.first().map(|item| &item.notice) == Some(&current_notice) {
                     return;
                 }
 
@@ -214,6 +215,7 @@ pub fn App() -> impl IntoView {
                             selected_sync_speed_mode: selected_sync_speed_mode.get_untracked(),
                             selected_sync_color_palette: selected_sync_color_palette
                                 .get_untracked(),
+                            selected_sync_brightness_ceiling: None,
                         };
                         let _ = storage::save_audio_sync_preferences(&preferences).await;
                     }
@@ -290,6 +292,7 @@ pub fn App() -> impl IntoView {
                             selected_sync_speed_mode: selected_sync_speed_mode.get_untracked(),
                             selected_sync_color_palette: selected_sync_color_palette
                                 .get_untracked(),
+                            selected_sync_brightness_ceiling: None,
                         };
                         let _ = storage::save_audio_sync_preferences(&preferences).await;
                     }
@@ -482,12 +485,52 @@ pub fn App() -> impl IntoView {
         refresh_pipewire_targets.run(());
     });
 
+    Effect::new({
+        let interval_id = Rc::clone(&audio_sync_preview_interval_id);
+        let interval_closure = Rc::clone(&audio_sync_preview_interval_closure);
+        move |_| {
+            if is_audio_syncing.get() {
+                if interval_id.get().is_some() {
+                    return;
+                }
+
+                let callback = Closure::wrap(Box::new(move || {
+                    spawn_local(async move {
+                        if let Ok(preview) = hue::get_hue_audio_sync_preview().await {
+                            set_audio_sync_preview.set(preview);
+                        }
+                    });
+                }) as Box<dyn FnMut()>);
+
+                if let Some(window) = leptos::web_sys::window() {
+                    if let Ok(id) = window.set_interval_with_callback_and_timeout_and_arguments_0(
+                        callback.as_ref().unchecked_ref(),
+                        80,
+                    ) {
+                        interval_id.set(Some(id));
+                        *interval_closure.borrow_mut() = Some(callback);
+                        return;
+                    }
+                }
+
+                set_audio_sync_preview.set(None);
+            } else {
+                if let Some(window) = leptos::web_sys::window() {
+                    if let Some(id) = interval_id.get() {
+                        window.clear_interval_with_handle(id);
+                    }
+                }
+                interval_id.set(None);
+                *interval_closure.borrow_mut() = None;
+                set_audio_sync_preview.set(None);
+            }
+        }
+    });
+
     Effect::new(move |_| {
         let area_id = selected_entertainment_area_id.get();
         let color_palette = selected_sync_color_palette.get();
-        let (base_color_hex, brightness_ceiling) = if area_id.trim().is_empty()
-            || !matches!(color_palette, AudioSyncColorPalette::CurrentRoom)
-        {
+        let (derived_base_color_hex, derived_brightness_ceiling) = if area_id.trim().is_empty() {
             (None, None)
         } else {
             derive_audio_sync_visual_profile(
@@ -500,6 +543,12 @@ pub fn App() -> impl IntoView {
                 &area_id,
             )
         };
+        let base_color_hex = if matches!(color_palette, AudioSyncColorPalette::CurrentRoom) {
+            derived_base_color_hex
+        } else {
+            None
+        };
+        let brightness_ceiling = derived_brightness_ceiling;
 
         let selection = AudioSyncSelection {
             area_id,
@@ -524,9 +573,6 @@ pub fn App() -> impl IntoView {
             return;
         };
 
-        let areas = entertainment_areas.get();
-        let current_groups = groups.get();
-        let current_lights = lights.get();
         set_last_applied_audio_sync_selection.set(selection.clone());
 
         spawn_local(async move {
@@ -537,13 +583,8 @@ pub fn App() -> impl IntoView {
                 match request_audio_sync_update(
                     selection.speed_mode,
                     selection.color_palette,
-                    &areas,
-                    &current_groups,
-                    &current_lights,
-                    &scenes.get(),
-                    &active_scene_by_group.get(),
-                    last_activated_scene_id.get().as_deref(),
-                    &selection.area_id,
+                    selection.base_color_hex.clone(),
+                    selection.brightness_ceiling,
                 )
                 .await
                 {
@@ -560,12 +601,8 @@ pub fn App() -> impl IntoView {
                     selection.pipewire_target_object.clone(),
                     selection.speed_mode,
                     selection.color_palette,
-                    &areas,
-                    &current_groups,
-                    &current_lights,
-                    &scenes.get(),
-                    &active_scene_by_group.get(),
-                    last_activated_scene_id.get().as_deref(),
+                    selection.base_color_hex.clone(),
+                    selection.brightness_ceiling,
                 )
                 .await
                 {
@@ -1055,6 +1092,7 @@ pub fn App() -> impl IntoView {
                     },
                     selected_sync_speed_mode: selected_sync_speed_mode.get_untracked(),
                     selected_sync_color_palette: selected_sync_color_palette.get_untracked(),
+                    selected_sync_brightness_ceiling: None,
                 };
                 if let Err(error) = storage::save_audio_sync_preferences(&preferences).await {
                     set_notice.set(Some(UiNotice::warning(
@@ -1088,6 +1126,7 @@ pub fn App() -> impl IntoView {
                     },
                     selected_sync_speed_mode: selected_sync_speed_mode.get_untracked(),
                     selected_sync_color_palette: selected_sync_color_palette.get_untracked(),
+                    selected_sync_brightness_ceiling: None,
                 };
                 if let Err(error) = storage::save_audio_sync_preferences(&preferences).await {
                     set_notice.set(Some(UiNotice::warning(
@@ -1124,6 +1163,7 @@ pub fn App() -> impl IntoView {
                     },
                     selected_sync_speed_mode: mode,
                     selected_sync_color_palette: selected_sync_color_palette.get_untracked(),
+                    selected_sync_brightness_ceiling: None,
                 };
                 if let Err(error) = storage::save_audio_sync_preferences(&preferences).await {
                     set_notice.set(Some(UiNotice::warning(
@@ -1160,6 +1200,7 @@ pub fn App() -> impl IntoView {
                     },
                     selected_sync_speed_mode: selected_sync_speed_mode.get_untracked(),
                     selected_sync_color_palette: palette,
+                    selected_sync_brightness_ceiling: None,
                 };
                 if let Err(error) = storage::save_audio_sync_preferences(&preferences).await {
                     set_notice.set(Some(UiNotice::warning(
@@ -1214,20 +1255,22 @@ pub fn App() -> impl IntoView {
             let areas = entertainment_areas.get_untracked();
             let current_groups = groups.get_untracked();
             let current_lights = lights.get_untracked();
-            let (base_color_hex, brightness_ceiling) =
-                if matches!(color_palette, AudioSyncColorPalette::CurrentRoom) {
-                    derive_audio_sync_visual_profile(
-                        &areas,
-                        &current_groups,
-                        &current_lights,
-                        &scenes.get_untracked(),
-                        &active_scene_by_group.get_untracked(),
-                        last_activated_scene_id.get_untracked().as_deref(),
-                        &area_id,
-                    )
-                } else {
-                    (None, None)
-                };
+            let (derived_base_color_hex, derived_brightness_ceiling) =
+                derive_audio_sync_visual_profile(
+                    &areas,
+                    &current_groups,
+                    &current_lights,
+                    &scenes.get_untracked(),
+                    &active_scene_by_group.get_untracked(),
+                    last_activated_scene_id.get_untracked().as_deref(),
+                    &area_id,
+                );
+            let base_color_hex = if matches!(color_palette, AudioSyncColorPalette::CurrentRoom) {
+                derived_base_color_hex
+            } else {
+                None
+            };
+            let brightness_ceiling = derived_brightness_ceiling;
 
             set_is_audio_sync_starting.set(true);
             spawn_local(async move {
@@ -1237,12 +1280,8 @@ pub fn App() -> impl IntoView {
                     pipewire_target_object,
                     speed_mode,
                     color_palette,
-                    &areas,
-                    &current_groups,
-                    &current_lights,
-                    &scenes.get_untracked(),
-                    &active_scene_by_group.get_untracked(),
-                    last_activated_scene_id.get_untracked().as_deref(),
+                    base_color_hex.clone(),
+                    brightness_ceiling,
                 )
                 .await
                 {
@@ -1281,6 +1320,9 @@ pub fn App() -> impl IntoView {
                     Ok(()) => {
                         set_is_audio_syncing.set(false);
                         set_is_audio_sync_starting.set(false);
+                        if let Some(connection) = active_connection.get_untracked() {
+                            refresh_bridge_state.run(connection);
+                        }
                         set_notice.set(Some(UiNotice::success(
                             "Audio sync stopped",
                             "Hue Entertainment streaming has been disabled for the current area.",
@@ -1309,19 +1351,19 @@ pub fn App() -> impl IntoView {
             };
 
             let Some((_, room_lights)) =
-                collect_room_context(&groups.get_untracked(), &lights.get_untracked(), &room_id)
+                collect_group_context(&groups.get_untracked(), &lights.get_untracked(), &room_id)
             else {
                 set_notice.set(Some(UiNotice::warning(
-                    "Room not available",
-                    "The selected room is not available in the current bridge snapshot.",
+                    "Group not available",
+                    "The selected room or zone is not available in the current bridge snapshot.",
                 )));
                 return;
             };
 
             if room_lights.is_empty() {
                 set_notice.set(Some(UiNotice::warning(
-                    "No room devices found",
-                    "This room does not currently expose any lights to control.",
+                    "No group devices found",
+                    "This room or zone does not currently expose any lights to control.",
                 )));
                 return;
             }
@@ -1374,19 +1416,19 @@ pub fn App() -> impl IntoView {
             };
 
             let Some((_, room_lights)) =
-                collect_room_context(&groups.get_untracked(), &lights.get_untracked(), &room_id)
+                collect_group_context(&groups.get_untracked(), &lights.get_untracked(), &room_id)
             else {
                 set_notice.set(Some(UiNotice::warning(
-                    "Room not available",
-                    "The selected room is not available in the current bridge snapshot.",
+                    "Group not available",
+                    "The selected room or zone is not available in the current bridge snapshot.",
                 )));
                 return;
             };
 
             if room_lights.is_empty() {
                 set_notice.set(Some(UiNotice::warning(
-                    "No room devices found",
-                    "This room does not currently expose any lights to control.",
+                    "No group devices found",
+                    "This room or zone does not currently expose any lights to control.",
                 )));
                 return;
             }
@@ -1486,6 +1528,155 @@ pub fn App() -> impl IntoView {
                     "Room brightness updated",
                 );
             }
+        }
+    });
+
+    let toggle_entertainment_area = Callback::new({
+        move |area_id: String| {
+            let connection = match active_connection.get_untracked() {
+                Some(connection) => connection,
+                None => {
+                    set_notice.set(Some(UiNotice::warning(
+                        "No active bridge connection",
+                        "Connect to a bridge before changing entertainment area state.",
+                    )));
+                    return;
+                }
+            };
+
+            let Some(area_lights) = entertainment_area_lights(
+                &entertainment_areas.get_untracked(),
+                &groups.get_untracked(),
+                &lights.get_untracked(),
+                &area_id,
+            ) else {
+                set_notice.set(Some(UiNotice::warning(
+                    "Entertainment area not available",
+                    "The selected entertainment area is not available in the current bridge snapshot.",
+                )));
+                return;
+            };
+
+            if area_lights.is_empty() {
+                set_notice.set(Some(UiNotice::warning(
+                    "No area devices found",
+                    "This entertainment area does not currently expose any lights to control.",
+                )));
+                return;
+            }
+
+            let should_turn_on = area_lights
+                .iter()
+                .all(|light| !light.is_on.unwrap_or(false));
+            let requests = area_lights
+                .iter()
+                .map(|light| SetLightStateRequest {
+                    bridge_ip: connection.bridge_ip.clone(),
+                    username: connection.username.clone(),
+                    light_id: light.id.clone(),
+                    state: LightStateUpdate {
+                        on: Some(should_turn_on),
+                        brightness: None,
+                        saturation: None,
+                        hue: None,
+                        transition_time: Some(3),
+                    },
+                })
+                .collect::<Vec<_>>();
+
+            run_room_update(
+                area_id.clone(),
+                requests,
+                set_pending_room_control_ids,
+                set_lights,
+                set_notice,
+                if should_turn_on {
+                    "Entertainment zone turned on"
+                } else {
+                    "Entertainment zone turned off"
+                },
+            );
+        }
+    });
+
+    let set_entertainment_area_brightness = Callback::new({
+        move |(area_id, brightness): (String, u8)| {
+            let connection = match active_connection.get_untracked() {
+                Some(connection) => connection,
+                None => {
+                    set_notice.set(Some(UiNotice::warning(
+                        "No active bridge connection",
+                        "Connect to a bridge before changing entertainment area brightness.",
+                    )));
+                    return;
+                }
+            };
+
+            let Some(area_lights) = entertainment_area_lights(
+                &entertainment_areas.get_untracked(),
+                &groups.get_untracked(),
+                &lights.get_untracked(),
+                &area_id,
+            ) else {
+                set_notice.set(Some(UiNotice::warning(
+                    "Entertainment area not available",
+                    "The selected entertainment area is not available in the current bridge snapshot.",
+                )));
+                return;
+            };
+
+            if area_lights.is_empty() {
+                set_notice.set(Some(UiNotice::warning(
+                    "No area devices found",
+                    "This entertainment area does not currently expose any lights to control.",
+                )));
+                return;
+            }
+
+            let brightness = brightness.max(1);
+            let optimistic_state = LightStateUpdate {
+                on: Some(true),
+                brightness: Some(brightness),
+                saturation: None,
+                hue: None,
+                transition_time: Some(4),
+            };
+            let light_ids = area_lights
+                .iter()
+                .map(|light| light.id.clone())
+                .collect::<HashSet<_>>();
+            set_lights.update(|lights| {
+                for light in lights {
+                    if light_ids.contains(&light.id) {
+                        apply_state_update(light, &optimistic_state);
+                    }
+                }
+            });
+
+            let requests = area_lights
+                .iter()
+                .map(|light| SetLightStateRequest {
+                    bridge_ip: connection.bridge_ip.clone(),
+                    username: connection.username.clone(),
+                    light_id: light.id.clone(),
+                    state: LightStateUpdate {
+                        on: Some(true),
+                        brightness: Some(brightness),
+                        saturation: None,
+                        hue: None,
+                        transition_time: Some(4),
+                    },
+                })
+                .collect::<Vec<_>>();
+
+            run_room_update(
+                area_id.clone(),
+                requests,
+                set_pending_room_control_ids,
+                set_lights,
+                set_notice,
+                "Entertainment zone brightness updated",
+            );
         }
     });
 
@@ -2248,6 +2439,24 @@ pub fn App() -> impl IntoView {
             }
         })
     });
+    let syncing_room_ids = Signal::derive(move || {
+        if !is_audio_syncing.get() {
+            return HashSet::new();
+        }
+
+        let area_id = audio_sync_preview
+            .get()
+            .map(|preview| preview.entertainment_area_id)
+            .unwrap_or_else(|| selected_entertainment_area_id.get());
+        let Some(area) = entertainment_areas
+            .get()
+            .into_iter()
+            .find(|area| area.id == area_id)
+        else {
+            return HashSet::new();
+        };
+        room_ids_for_entertainment_area(&area, &groups.get())
+    });
 
     view! {
         <main class="app-shell">
@@ -2370,18 +2579,23 @@ pub fn App() -> impl IntoView {
                                 lights=lights
                                 groups=groups
                                 scenes=scenes
+                                entertainment_areas=entertainment_areas
                                 room_order=room_order
                                 pending_scene_id=pending_scene_id
                                 pending_room_ids=pending_room_ids
                                 pending_room_control_ids=pending_room_control_ids
                                 pending_light_ids=pending_light_ids
                                 active_scene_by_group=active_scene_by_group
+                                audio_sync_preview=audio_sync_preview
+                                syncing_room_ids=syncing_room_ids
                                 active_connection=active_connection
                                 is_refreshing=is_refreshing
                                 on_open_settings=Callback::new(move |_| set_page.set(AppPage::Settings))
                                 on_toggle_all_lights=toggle_all_lights
                                 on_toggle_room=toggle_room
                                 on_set_room_brightness=set_room_brightness
+                                on_toggle_entertainment_area=toggle_entertainment_area
+                                on_set_entertainment_area_brightness=set_entertainment_area_brightness
                                 on_toggle_light=toggle_light
                                 on_set_light_brightness=set_light_brightness
                                 on_activate_scene=activate_scene
@@ -2519,6 +2733,7 @@ fn run_room_update(
         return;
     }
 
+    let request_count = requests.len();
     let light_states = requests
         .iter()
         .map(|request| (request.light_id.clone(), request.state.clone()))
@@ -2529,21 +2744,32 @@ fn run_room_update(
     });
 
     spawn_local(async move {
-        let mut error = None;
+        let mut first_error = None::<String>;
+        let mut successful_light_ids = HashSet::<String>::new();
 
         for request in requests {
-            if let Err(request_error) = hue::set_hue_light_state(request).await {
-                error = Some(request_error);
-                break;
+            let light_id = request.light_id.clone();
+            match hue::set_hue_light_state(request).await {
+                Ok(()) => {
+                    successful_light_ids.insert(light_id);
+                }
+                Err(request_error) => {
+                    if first_error.is_none() {
+                        first_error = Some(request_error);
+                    }
+                }
             }
         }
 
-        match error {
-            None => {
+        let failure_count = request_count.saturating_sub(successful_light_ids.len());
+        match (successful_light_ids.is_empty(), failure_count) {
+            (false, 0) => {
                 set_lights.update(|lights| {
                     for light in lights {
-                        if let Some(state) = light_states.get(&light.id) {
-                            apply_state_update(light, state);
+                        if successful_light_ids.contains(&light.id) {
+                            if let Some(state) = light_states.get(&light.id) {
+                                apply_state_update(light, state);
+                            }
                         }
                     }
                 });
@@ -2553,8 +2779,31 @@ fn run_room_update(
                     "The latest room change was accepted by the bridge.",
                 )));
             }
-            Some(error) => {
-                set_notice.set(Some(UiNotice::error("Room update failed", error)));
+            (false, failed) => {
+                set_lights.update(|lights| {
+                    for light in lights {
+                        if successful_light_ids.contains(&light.id) {
+                            if let Some(state) = light_states.get(&light.id) {
+                                apply_state_update(light, state);
+                            }
+                        }
+                    }
+                });
+                let first_error = first_error.unwrap_or_else(|| "Unknown bridge error".to_string());
+                set_notice.set(Some(UiNotice::warning(
+                    "Partial update",
+                    format!(
+                        "{success_title}: updated {} device{}, but {failed} failed. First error: {first_error}",
+                        successful_light_ids.len(),
+                        if successful_light_ids.len() == 1 { "" } else { "s" },
+                    ),
+                )));
+            }
+            (true, _) => {
+                set_notice.set(Some(UiNotice::error(
+                    "Group update failed",
+                    first_error.unwrap_or_else(|| "Unknown bridge error".to_string()),
+                )));
             }
         }
 
@@ -2623,23 +2872,9 @@ async fn request_audio_sync_start(
     pipewire_target_object: String,
     speed_mode: AudioSyncSpeedMode,
     color_palette: AudioSyncColorPalette,
-    entertainment_areas: &[EntertainmentArea],
-    groups: &[Group],
-    lights: &[Light],
-    scenes: &[Scene],
-    active_scene_by_group: &HashMap<String, String>,
-    last_activated_scene_id: Option<&str>,
+    base_color_hex: Option<String>,
+    brightness_ceiling: Option<u8>,
 ) -> Result<hue::AudioSyncStartResult, String> {
-    let (base_color_hex, brightness_ceiling) = derive_audio_sync_visual_profile(
-        entertainment_areas,
-        groups,
-        lights,
-        scenes,
-        active_scene_by_group,
-        last_activated_scene_id,
-        &entertainment_area_id,
-    );
-
     hue::start_hue_audio_sync(AudioSyncStartRequest {
         connection,
         entertainment_area_id,
@@ -2659,24 +2894,9 @@ async fn request_audio_sync_start(
 async fn request_audio_sync_update(
     speed_mode: AudioSyncSpeedMode,
     color_palette: AudioSyncColorPalette,
-    entertainment_areas: &[EntertainmentArea],
-    groups: &[Group],
-    lights: &[Light],
-    scenes: &[Scene],
-    active_scene_by_group: &HashMap<String, String>,
-    last_activated_scene_id: Option<&str>,
-    entertainment_area_id: &str,
+    base_color_hex: Option<String>,
+    brightness_ceiling: Option<u8>,
 ) -> Result<(), String> {
-    let (base_color_hex, brightness_ceiling) = derive_audio_sync_visual_profile(
-        entertainment_areas,
-        groups,
-        lights,
-        scenes,
-        active_scene_by_group,
-        last_activated_scene_id,
-        entertainment_area_id,
-    );
-
     hue::update_hue_audio_sync(AudioSyncUpdateRequest {
         speed_mode,
         color_palette,
@@ -2781,23 +3001,49 @@ async fn restore_room_lights(
     Ok(())
 }
 
-fn collect_room_context(
+fn collect_group_context(
     groups: &[Group],
     lights: &[Light],
-    room_id: &str,
+    group_id: &str,
 ) -> Option<(Group, Vec<Light>)> {
-    let room = groups
+    let group = groups
         .iter()
-        .find(|group| group.id == room_id && matches!(group.kind, GroupKind::Room))?
+        .find(|group| {
+            group.id == group_id && matches!(group.kind, GroupKind::Room | GroupKind::Zone)
+        })?
         .clone();
 
-    let room_lights = room
+    let room_lights = group
         .light_ids
         .iter()
         .filter_map(|light_id| lights.iter().find(|light| light.id == *light_id).cloned())
         .collect::<Vec<_>>();
 
-    Some((room, room_lights))
+    Some((group, room_lights))
+}
+
+fn entertainment_area_lights(
+    areas: &[EntertainmentArea],
+    groups: &[Group],
+    lights: &[Light],
+    area_id: &str,
+) -> Option<Vec<Light>> {
+    let area = areas.iter().find(|area| area.id == area_id)?;
+    let light_ids = if area.light_ids.is_empty() {
+        best_matching_audio_sync_group(area, groups)
+            .map(|group| group.light_ids.iter().cloned().collect::<HashSet<_>>())
+            .unwrap_or_default()
+    } else {
+        area.light_ids.iter().cloned().collect::<HashSet<_>>()
+    };
+
+    let mut resolved = lights
+        .iter()
+        .filter(|light| light_ids.contains(&light.id))
+        .cloned()
+        .collect::<Vec<_>>();
+    resolved.sort_by(|left, right| left.name.cmp(&right.name));
+    Some(resolved)
 }
 
 fn scene_composer_state(request: &SceneComposerRequest) -> LightStateUpdate {
@@ -2921,6 +3167,55 @@ fn best_matching_audio_sync_group<'a>(
     }
 
     best.map(|(group, _)| group)
+}
+
+fn room_ids_for_entertainment_area(area: &EntertainmentArea, groups: &[Group]) -> HashSet<String> {
+    let mut room_ids = HashSet::new();
+
+    if !area.light_ids.is_empty() {
+        let area_light_ids = area.light_ids.iter().collect::<HashSet<_>>();
+        for room in groups
+            .iter()
+            .filter(|group| matches!(group.kind, GroupKind::Room))
+        {
+            if room
+                .light_ids
+                .iter()
+                .any(|light_id| area_light_ids.contains(light_id))
+            {
+                room_ids.insert(room.id.clone());
+            }
+        }
+        if !room_ids.is_empty() {
+            return room_ids;
+        }
+    }
+
+    let Some(matched_group) = best_matching_audio_sync_group(area, groups) else {
+        return room_ids;
+    };
+
+    match matched_group.kind {
+        GroupKind::Room => {
+            room_ids.insert(matched_group.id.clone());
+        }
+        GroupKind::Zone => {
+            for room in groups
+                .iter()
+                .filter(|group| matches!(group.kind, GroupKind::Room))
+            {
+                if room
+                    .light_ids
+                    .iter()
+                    .any(|light_id| matched_group.light_ids.contains(light_id))
+                {
+                    room_ids.insert(room.id.clone());
+                }
+            }
+        }
+    }
+
+    room_ids
 }
 
 fn normalize_audio_sync_name(name: &str) -> String {
@@ -3107,11 +3402,7 @@ fn hsv_to_rgb_float(hue: f32, saturation: f32, value: f32) -> (u8, u8, u8) {
 }
 
 fn pluralize(count: usize) -> &'static str {
-    if count == 1 {
-        ""
-    } else {
-        "s"
-    }
+    if count == 1 { "" } else { "s" }
 }
 
 fn is_ollama_connectivity_error(error: &str) -> bool {

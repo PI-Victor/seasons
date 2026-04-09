@@ -171,6 +171,10 @@ pub fn AudioSyncPanel(
                             <option value="ocean">"Ocean"</option>
                             <option value="rose">"Rose"</option>
                             <option value="mono">"Mono"</option>
+                            <option value="neonPulse">"Neon pulse"</option>
+                            <option value="prism">"Prism"</option>
+                            <option value="vocalGlow">"Vocal glow"</option>
+                            <option value="fireIce">"Fire and ice"</option>
                         </select>
                     </label>
                 </div>
@@ -230,6 +234,10 @@ fn audio_sync_color_palette_value(palette: AudioSyncColorPalette) -> &'static st
         AudioSyncColorPalette::Ocean => "ocean",
         AudioSyncColorPalette::Rose => "rose",
         AudioSyncColorPalette::Mono => "mono",
+        AudioSyncColorPalette::NeonPulse => "neonPulse",
+        AudioSyncColorPalette::Prism => "prism",
+        AudioSyncColorPalette::VocalGlow => "vocalGlow",
+        AudioSyncColorPalette::FireIce => "fireIce",
     }
 }
 
@@ -240,6 +248,10 @@ fn parse_audio_sync_color_palette(value: &str) -> AudioSyncColorPalette {
         "ocean" => AudioSyncColorPalette::Ocean,
         "rose" => AudioSyncColorPalette::Rose,
         "mono" => AudioSyncColorPalette::Mono,
+        "neonPulse" => AudioSyncColorPalette::NeonPulse,
+        "prism" => AudioSyncColorPalette::Prism,
+        "vocalGlow" => AudioSyncColorPalette::VocalGlow,
+        "fireIce" => AudioSyncColorPalette::FireIce,
         _ => AudioSyncColorPalette::CurrentRoom,
     }
 }

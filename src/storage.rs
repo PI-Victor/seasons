@@ -35,6 +35,7 @@ pub struct AudioSyncPreferences {
     pub selected_pipewire_target_object: Option<String>,
     pub selected_sync_speed_mode: AudioSyncSpeedMode,
     pub selected_sync_color_palette: AudioSyncColorPalette,
+    pub selected_sync_brightness_ceiling: Option<u8>,
 }
 
 pub async fn load_bridge_connection() -> Result<Option<BridgeConnection>, String> {

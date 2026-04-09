@@ -58,6 +58,8 @@ pub struct EntertainmentArea {
     pub configuration_type: Option<String>,
     pub status: String,
     pub channels: Vec<EntertainmentChannel>,
+    #[serde(default)]
+    pub light_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -176,6 +178,16 @@ pub struct AudioSyncStartResult {
     pub entertainment_area_id: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioSyncPreview {
+    pub entertainment_area_id: String,
+    pub red: u8,
+    pub green: u8,
+    pub blue: u8,
+    pub intensity: f32,
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum AudioSyncSpeedMode {
@@ -195,6 +207,10 @@ pub enum AudioSyncColorPalette {
     Ocean,
     Rose,
     Mono,
+    NeonPulse,
+    Prism,
+    VocalGlow,
+    FireIce,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
