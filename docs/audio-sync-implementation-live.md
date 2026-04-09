@@ -1,7 +1,7 @@
 # Audio Sync Algorithm Upgrade (Live Doc)
 
 Started: 2026-04-09T12:49:33Z  
-Status: In progress
+Status: Complete
 
 ## Goal
 Improve Hue entertainment audio sync so it feels closer to polished apps:
@@ -24,7 +24,7 @@ No UI redesign in this implementation pass.
 - [x] Phase 3: Rework intensity composition for fast top-out and controlled decay
 - [x] Phase 4: Tune color-band routing for low+mids pulse priority
 - [x] Phase 5: Add/update tests and run focused checks
-- [ ] Phase 6: Commit in small logical units
+- [x] Phase 6: Commit in small logical units
 
 ## Acceptance Criteria
 - Audio sync reaches visible peaks faster on kick/snare events.
@@ -46,3 +46,4 @@ No UI redesign in this implementation pass.
   - `RUSTC_WRAPPER= cargo check -p seasons-ui`
   - `RUSTC_WRAPPER= cargo test -p seasons audio::analysis::tests -- --nocapture`
   - `RUSTC_WRAPPER= cargo test -p seasons audio::sync::tests -- --nocapture`
+- 2026-04-09T13:18:30Z: Phase 6 completed with two logical commits (`build` edition bump + `feat(audio-sync)` DSP upgrade).
