@@ -15,8 +15,8 @@
 // limitations under the License.
 
 use crate::audio::analysis::AudioFeatures;
-use crate::audio::capture::{start_sink_capture, AudioCaptureHandle};
-use crate::hue::entertainment::{build_rgb_channels, empty_rgb_frame, EntertainmentStreamSession};
+use crate::audio::capture::{AudioCaptureHandle, start_sink_capture};
+use crate::hue::entertainment::{EntertainmentStreamSession, build_rgb_channels, empty_rgb_frame};
 use crate::hue::error::HueError;
 use crate::hue::models::AudioSyncStartResult;
 use crate::hue::models::{AudioSyncColorPalette, AudioSyncSpeedMode};
@@ -215,6 +215,9 @@ async fn run_stream_loop(
     let mut smoothed_onset = 0.0_f32;
     let mut display_intensity = 0.0_f32;
     let mut accent_envelope = 0.0_f32;
+    let mut steady_agc = AdaptiveGain::new();
+    let mut transient_agc = AdaptiveGain::new();
+    let mut pulse_agc = AdaptiveGain::new();
     let mut level_range = DynamicRange::new(0.01, 0.18);
     let mut bass_range = DynamicRange::new(0.01, 0.20);
     let mut mid_range = DynamicRange::new(0.01, 0.20);
@@ -394,17 +397,51 @@ async fn run_stream_loop(
                         (red, green, blue)
                     };
 
-                    let steady_driver = (
+                    let steady_driver_raw = (
                         level * profile.level_intensity_weight
                         + bass * profile.bass_intensity_weight
                         + mid * profile.mid_intensity_weight
                         + treble * profile.treble_intensity_weight
                     ).clamp(0.0, 1.0);
-                    let transient_driver = (
+                    let transient_driver_raw = (
                         bass_pulse * profile.bass_pulse_intensity_weight
                         + attack * profile.attack_intensity_weight
                         + onset * profile.onset_intensity_weight
                     ).clamp(0.0, 1.0);
+                    // Main pulse should follow groove energy: bass body + mid-band punch,
+                    // with snare/attack and bass transients adding the sharp accents.
+                    let main_pulse_driver_raw = (
+                        bass * 0.34
+                        + mid * 0.28
+                        + bass_pulse * 0.24
+                        + attack * 0.12
+                        + onset * 0.02
+                    ).clamp(0.0, 1.0);
+
+                    let steady_driver = steady_agc.process(
+                        shape_response(steady_driver_raw, profile.steady_driver_power),
+                        profile.steady_agc_target,
+                        profile.agc_kp,
+                        profile.agc_ki,
+                        profile.agc_min_gain,
+                        profile.agc_max_gain,
+                    );
+                    let transient_driver = transient_agc.process(
+                        shape_response(transient_driver_raw, profile.transient_driver_power),
+                        profile.transient_agc_target,
+                        profile.agc_kp * 1.15,
+                        profile.agc_ki * 1.20,
+                        profile.agc_min_gain,
+                        profile.agc_max_gain * 1.12,
+                    );
+                    let main_pulse_driver = pulse_agc.process(
+                        fast_top_out(main_pulse_driver_raw, profile.main_pulse_top_out_power),
+                        profile.pulse_agc_target,
+                        profile.agc_kp * 1.35,
+                        profile.agc_ki * 1.45,
+                        profile.agc_min_gain,
+                        profile.agc_max_gain * 1.24,
+                    );
 
                     let target_intensity = (profile.intensity_floor
                         + steady_driver.powf(profile.level_power) * profile.intensity_range)
@@ -415,12 +452,14 @@ async fn run_stream_loop(
                         profile.intensity_release_smoothing
                     };
                     display_intensity = smooth(display_intensity, target_intensity, intensity_smoothing);
-                    accent_envelope =
-                        (accent_envelope * profile.accent_decay).max(shape_response(transient_driver, 0.62));
+                    accent_envelope = (accent_envelope * profile.accent_decay)
+                        .max(shape_response(main_pulse_driver, 0.52));
                     let flash_boost = accent_envelope
+                        * profile.flash_gain
                         * profile.onset_flash_range
-                        * (0.60 + 0.40 * steady_driver.clamp(0.0, 1.0));
-                    let motion_lift = (steady_driver * 0.16 + transient_driver * 0.14)
+                        * (0.56 + 0.44 * transient_driver);
+                    let motion_lift =
+                        (steady_driver * 0.10 + transient_driver * 0.18 + main_pulse_driver * 0.22)
                         .min(profile.intensity_ceiling * 0.35);
 
                     let intensity = (display_intensity + motion_lift + flash_boost)
@@ -438,6 +477,7 @@ async fn run_stream_loop(
                             onset,
                             steady_driver,
                             transient_driver,
+                            main_pulse_driver,
                             motion_lift,
                             display_intensity,
                             accent_envelope,
@@ -479,6 +519,10 @@ fn amplify(value: f32, gain: f32) -> f32 {
 
 fn shape_response(value: f32, power: f32) -> f32 {
     value.clamp(0.0, 1.0).powf(power)
+}
+
+fn fast_top_out(value: f32, power: f32) -> f32 {
+    1.0 - (1.0 - value.clamp(0.0, 1.0)).powf(power.max(0.05))
 }
 
 #[derive(Clone, Copy)]
@@ -523,6 +567,38 @@ impl DynamicRange {
 }
 
 #[derive(Clone, Copy)]
+struct AdaptiveGain {
+    gain: f32,
+    integral: f32,
+}
+
+impl AdaptiveGain {
+    fn new() -> Self {
+        Self {
+            gain: 1.0,
+            integral: 0.0,
+        }
+    }
+
+    fn process(
+        &mut self,
+        input: f32,
+        target: f32,
+        kp: f32,
+        ki: f32,
+        min_gain: f32,
+        max_gain: f32,
+    ) -> f32 {
+        let value = input.clamp(0.0, 1.0);
+        let output = (value * self.gain).clamp(0.0, 1.0);
+        let error = (target - output).clamp(-1.0, 1.0);
+        self.integral = (self.integral + error * ki).clamp(-0.9, 0.9);
+        self.gain = (self.gain + error * kp + self.integral * 0.18).clamp(min_gain, max_gain);
+        (value * self.gain).clamp(0.0, 1.0)
+    }
+}
+
+#[derive(Clone, Copy)]
 struct StreamProfile {
     base_color: (f32, f32, f32),
     low_color: (f32, f32, f32),
@@ -545,6 +621,17 @@ struct StreamProfile {
     treble_intensity_weight: f32,
     onset_intensity_weight: f32,
     onset_flash_range: f32,
+    steady_agc_target: f32,
+    transient_agc_target: f32,
+    pulse_agc_target: f32,
+    agc_kp: f32,
+    agc_ki: f32,
+    agc_min_gain: f32,
+    agc_max_gain: f32,
+    steady_driver_power: f32,
+    transient_driver_power: f32,
+    main_pulse_top_out_power: f32,
+    flash_gain: f32,
     level_gain: f32,
     bass_gain: f32,
     bass_pulse_gain: f32,
@@ -621,6 +708,29 @@ impl StreamProfile {
                 0.03, 0.18, 0.24,
             ),
         };
+        let (
+            steady_agc_target,
+            transient_agc_target,
+            pulse_agc_target,
+            agc_kp,
+            agc_ki,
+            agc_min_gain,
+            agc_max_gain,
+            steady_driver_power,
+            transient_driver_power,
+            main_pulse_top_out_power,
+            flash_gain,
+        ) = match speed_mode {
+            AudioSyncSpeedMode::Slow => (
+                0.72, 0.84, 0.90, 0.14, 0.016, 0.70, 2.6, 0.92, 0.72, 1.35, 0.76,
+            ),
+            AudioSyncSpeedMode::Medium => (
+                0.70, 0.86, 0.94, 0.18, 0.024, 0.64, 3.0, 0.86, 0.66, 1.60, 0.88,
+            ),
+            AudioSyncSpeedMode::High => (
+                0.66, 0.88, 0.96, 0.24, 0.036, 0.56, 3.4, 0.78, 0.58, 1.95, 0.98,
+            ),
+        };
         let brightness_ratio = brightness_ceiling.unwrap_or(100).clamp(1, 100) as f32 / 100.0;
         let idle_intensity = brightness_ratio.clamp(0.02, 1.0);
         let intensity_ceiling = brightness_ratio.clamp(0.02, 1.0);
@@ -655,6 +765,17 @@ impl StreamProfile {
             treble_intensity_weight,
             onset_intensity_weight,
             onset_flash_range,
+            steady_agc_target,
+            transient_agc_target,
+            pulse_agc_target,
+            agc_kp,
+            agc_ki,
+            agc_min_gain,
+            agc_max_gain,
+            steady_driver_power,
+            transient_driver_power,
+            main_pulse_top_out_power,
+            flash_gain,
             level_gain,
             bass_gain,
             bass_pulse_gain,
@@ -745,6 +866,34 @@ fn palette_colors(
             (1.0, 1.0, 1.0),
             false,
         ),
+        AudioSyncColorPalette::NeonPulse => (
+            (0.70, 0.30, 1.0),
+            (0.08, 0.22, 1.0),
+            (1.0, 0.20, 0.84),
+            (0.22, 1.0, 0.88),
+            false,
+        ),
+        AudioSyncColorPalette::Prism => (
+            (0.92, 0.94, 1.0),
+            (1.0, 0.28, 0.16),
+            (0.22, 0.96, 0.34),
+            (0.26, 0.42, 1.0),
+            false,
+        ),
+        AudioSyncColorPalette::VocalGlow => (
+            (1.0, 0.86, 0.66),
+            (0.12, 0.20, 0.72),
+            (1.0, 0.70, 0.28),
+            (0.74, 0.90, 1.0),
+            false,
+        ),
+        AudioSyncColorPalette::FireIce => (
+            (0.98, 0.86, 0.78),
+            (1.0, 0.30, 0.14),
+            (0.96, 0.64, 0.22),
+            (0.16, 0.84, 1.0),
+            false,
+        ),
     }
 }
 
@@ -798,7 +947,7 @@ fn mix_color(base: (f32, f32, f32), tint: (f32, f32, f32), amount: f32) -> (f32,
 
 #[cfg(test)]
 mod tests {
-    use super::{palette_colors, parse_hex_color, StreamProfile};
+    use super::{AdaptiveGain, StreamProfile, fast_top_out, palette_colors, parse_hex_color};
     use crate::hue::models::{AudioSyncColorPalette, AudioSyncSpeedMode};
 
     #[test]
@@ -808,6 +957,24 @@ mod tests {
         assert!((mid.0 - 0.501).abs() < 0.01);
         assert!((mid.1 - 0.250).abs() < 0.01);
         assert!((mid.2 - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn extended_palettes_use_dynamic_band_colors() {
+        let palettes = [
+            AudioSyncColorPalette::NeonPulse,
+            AudioSyncColorPalette::Prism,
+            AudioSyncColorPalette::VocalGlow,
+            AudioSyncColorPalette::FireIce,
+        ];
+
+        for palette in palettes {
+            let (base, low, mid, high, lock_base_hue) = palette_colors(palette, None);
+            assert!(!lock_base_hue);
+            assert_ne!(low, mid);
+            assert_ne!(mid, high);
+            assert_ne!(base, low);
+        }
     }
 
     #[test]
@@ -872,5 +1039,24 @@ mod tests {
     #[test]
     fn parses_hex_color() {
         assert_eq!(parse_hex_color(Some("#ff0000")), Some((1.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn fast_top_out_pushes_midrange_values_higher() {
+        let plain = 0.5_f32;
+        let boosted = fast_top_out(plain, 1.6);
+        assert!(boosted > plain);
+        assert!(boosted > 0.65);
+        assert!(fast_top_out(1.0, 1.6) <= 1.0);
+    }
+
+    #[test]
+    fn adaptive_gain_moves_signal_towards_target() {
+        let mut agc = AdaptiveGain::new();
+        let mut output = 0.0_f32;
+        for _ in 0..32 {
+            output = agc.process(0.2, 0.75, 0.20, 0.03, 0.5, 3.8);
+        }
+        assert!(output > 0.45);
     }
 }
