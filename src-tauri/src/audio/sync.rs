@@ -210,10 +210,18 @@ async fn run_stream_loop(
     profile: Arc<RwLock<StreamProfile>>,
 ) -> Result<(), HueError> {
     let mut latest = AudioFeatures::default();
+    let mut window_peak = AudioFeatures::default();
     let mut smoothed = AudioFeatures::default();
     let mut smoothed_onset = 0.0_f32;
     let mut display_intensity = 0.0_f32;
     let mut accent_envelope = 0.0_f32;
+    let mut level_range = DynamicRange::new(0.01, 0.18);
+    let mut bass_range = DynamicRange::new(0.01, 0.20);
+    let mut mid_range = DynamicRange::new(0.01, 0.20);
+    let mut attack_range = DynamicRange::new(0.01, 0.22);
+    let mut treble_range = DynamicRange::new(0.01, 0.20);
+    let mut onset_range = DynamicRange::new(0.01, 0.26);
+    let mut pulse_range = DynamicRange::new(0.01, 0.24);
     let mut saw_audio = false;
     let mut frame_index = 0_u32;
     debug!(area_id = %area.id, channel_count = area.channels.len(), "audio sync stream loop running");
@@ -235,8 +243,20 @@ async fn run_stream_loop(
                 let profile = *profile.read().map_err(|_| {
                     HueError::EntertainmentStream("audio sync profile lock poisoned".to_string())
                 })?;
+                let mut saw_new_features = false;
                 while let Ok(features) = feature_rx.try_recv() {
                     latest = features;
+                    if !saw_new_features {
+                        window_peak = features;
+                        saw_new_features = true;
+                    } else {
+                        window_peak.level = window_peak.level.max(features.level);
+                        window_peak.bass = window_peak.bass.max(features.bass);
+                        window_peak.mid = window_peak.mid.max(features.mid);
+                        window_peak.attack = window_peak.attack.max(features.attack);
+                        window_peak.treble = window_peak.treble.max(features.treble);
+                        window_peak.onset = window_peak.onset.max(features.onset);
+                    }
                     if features.level > 0.015
                         || features.bass > 0.02
                         || features.mid > 0.02
@@ -264,28 +284,92 @@ async fn run_stream_loop(
                     smoothed_onset =
                         smooth(smoothed_onset, latest.onset, profile.onset_smoothing);
 
-                    let level = amplify(smoothed.level, profile.level_gain);
-                    let bass =
-                        shape_response(amplify(smoothed.bass, profile.bass_gain), profile.bass_power);
+                    let level_raw = amplify(smoothed.level, profile.level_gain);
+                    let bass_raw = amplify(smoothed.bass, profile.bass_gain);
+                    let mid_raw = amplify(smoothed.mid, profile.mid_gain);
+                    let attack_raw = amplify(smoothed.attack, profile.attack_gain);
+                    let treble_raw = amplify(smoothed.treble, profile.treble_gain);
+                    let onset_raw = amplify(smoothed_onset.max(window_peak.onset), profile.onset_gain);
+                    let bass_pulse_raw = amplify(
+                        (window_peak.bass.max(latest.bass) - previous_smoothed_bass).max(0.0),
+                        profile.bass_pulse_gain,
+                    );
+
+                    let floor_attack = 0.014_f32;
+                    let floor_release = 0.0024_f32;
+                    let peak_attack = 0.42_f32;
+                    let peak_release = 0.030_f32;
+
+                    let level = level_range.normalize(
+                        level_raw,
+                        floor_attack,
+                        floor_release,
+                        peak_attack,
+                        peak_release,
+                    );
+                    let bass = shape_response(
+                        bass_range.normalize(
+                            bass_raw.max(window_peak.bass),
+                            floor_attack,
+                            floor_release,
+                            peak_attack,
+                            peak_release,
+                        ),
+                        profile.bass_power,
+                    );
                     let bass_pulse = shape_response(
-                        amplify(
-                            (latest.bass - previous_smoothed_bass).max(0.0),
-                            profile.bass_pulse_gain,
+                        pulse_range.normalize(
+                            bass_pulse_raw,
+                            floor_attack,
+                            floor_release,
+                            peak_attack,
+                            peak_release,
                         ),
                         profile.bass_pulse_power,
                     );
-                    let mid = amplify(smoothed.mid, profile.mid_gain);
-                    let attack =
-                        shape_response(amplify(smoothed.attack, profile.attack_gain), profile.attack_power);
-                    let treble = amplify(smoothed.treble, profile.treble_gain);
-                    let onset = amplify(smoothed_onset, profile.onset_gain);
+                    let mid = mid_range.normalize(
+                        mid_raw.max(window_peak.mid * 0.7),
+                        floor_attack,
+                        floor_release,
+                        peak_attack,
+                        peak_release,
+                    );
+                    let attack = shape_response(
+                        attack_range.normalize(
+                            attack_raw.max(window_peak.attack),
+                            floor_attack,
+                            floor_release,
+                            peak_attack,
+                            peak_release,
+                        ),
+                        profile.attack_power,
+                    );
+                    let treble = treble_range.normalize(
+                        treble_raw.max(window_peak.treble),
+                        floor_attack,
+                        floor_release,
+                        peak_attack,
+                        peak_release,
+                    );
+                    let onset = onset_range.normalize(
+                        onset_raw,
+                        floor_attack,
+                        floor_release,
+                        peak_attack,
+                        peak_release,
+                    );
 
                     let (red, green, blue) = if profile.lock_base_hue {
                         profile.base_color
                     } else {
-                        let low_weight = (0.18 + bass * 0.82).clamp(0.0, 1.0);
-                        let mid_weight = (0.15 + mid * 0.85).clamp(0.0, 1.0);
-                        let high_weight = (0.12 + treble * 0.88).clamp(0.0, 1.0);
+                        let low_driver = (bass * 0.76 + bass_pulse * 0.24).clamp(0.0, 1.0);
+                        let mid_driver = (mid * 0.72 + attack * 0.28).clamp(0.0, 1.0);
+                        let high_driver = (treble * 0.72 + onset * 0.28).clamp(0.0, 1.0);
+                        let band_sum = (low_driver + mid_driver + high_driver).max(0.0001);
+                        let low_weight = (0.08 + low_driver / band_sum * 0.92).clamp(0.0, 1.0);
+                        let mid_weight = (0.08 + mid_driver / band_sum * 0.92).clamp(0.0, 1.0);
+                        let high_weight =
+                            (0.08 + high_driver / band_sum * 0.92).clamp(0.0, 1.0);
 
                         let mut red = (profile.low_color.0 * low_weight
                             + profile.mid_color.0 * mid_weight
@@ -332,13 +416,15 @@ async fn run_stream_loop(
                     };
                     display_intensity = smooth(display_intensity, target_intensity, intensity_smoothing);
                     accent_envelope =
-                        (accent_envelope * profile.accent_decay).max(transient_driver);
+                        (accent_envelope * profile.accent_decay).max(shape_response(transient_driver, 0.62));
                     let flash_boost = accent_envelope
                         * profile.onset_flash_range
-                        * (0.45 + 0.55 * bass.clamp(0.0, 1.0));
+                        * (0.60 + 0.40 * steady_driver.clamp(0.0, 1.0));
+                    let motion_lift = (steady_driver * 0.16 + transient_driver * 0.14)
+                        .min(profile.intensity_ceiling * 0.35);
 
-                    let intensity =
-                        (display_intensity + flash_boost).clamp(0.0, profile.intensity_ceiling);
+                    let intensity = (display_intensity + motion_lift + flash_boost)
+                        .clamp(0.0, profile.intensity_ceiling);
 
                     if frame_index % 25 == 0 {
                         trace!(
@@ -352,6 +438,7 @@ async fn run_stream_loop(
                             onset,
                             steady_driver,
                             transient_driver,
+                            motion_lift,
                             display_intensity,
                             accent_envelope,
                             flash_boost,
@@ -392,6 +479,47 @@ fn amplify(value: f32, gain: f32) -> f32 {
 
 fn shape_response(value: f32, power: f32) -> f32 {
     value.clamp(0.0, 1.0).powf(power)
+}
+
+#[derive(Clone, Copy)]
+struct DynamicRange {
+    floor: f32,
+    peak: f32,
+}
+
+impl DynamicRange {
+    fn new(floor: f32, peak: f32) -> Self {
+        Self {
+            floor: floor.clamp(0.0, 1.0),
+            peak: peak.clamp(0.01, 1.0),
+        }
+    }
+
+    fn normalize(
+        &mut self,
+        value: f32,
+        floor_attack: f32,
+        floor_release: f32,
+        peak_attack: f32,
+        peak_release: f32,
+    ) -> f32 {
+        let input = value.clamp(0.0, 1.0);
+        if input < self.floor {
+            self.floor = smooth(self.floor, input, floor_attack);
+        } else {
+            self.floor = smooth(self.floor, input, floor_release);
+        }
+
+        let minimum_peak = (self.floor + 0.08).clamp(0.08, 1.0);
+        if input > self.peak {
+            self.peak = smooth(self.peak, input, peak_attack);
+        } else {
+            self.peak = smooth(self.peak, input.max(minimum_peak), peak_release);
+        }
+        self.peak = self.peak.max(minimum_peak);
+
+        ((input - self.floor) / (self.peak - self.floor + 0.0001)).clamp(0.0, 1.0)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -478,19 +606,19 @@ impl StreamProfile {
             onset_flash_range,
         ) = match speed_mode {
             AudioSyncSpeedMode::Slow => (
-                60, 0.12, 0.14, 0.18, 0.12, 0.16, 0.28, 0.18, 0.74, 1.1, 1.3, 2.4, 0.7, 1.35, 0.3,
-                1.8, 0.18, 0.04, 0.42, 1.18, 0.88, 1.20, 1.00, 0.24, 0.16, 0.34, 0.04, 0.14, 0.01,
-                0.10, 0.05,
+                52, 0.14, 0.16, 0.20, 0.14, 0.18, 0.30, 0.17, 0.72, 1.2, 1.45, 2.8, 0.78, 1.45,
+                0.36, 2.1, 0.24, 0.06, 0.56, 1.05, 0.84, 1.14, 0.95, 0.26, 0.20, 0.40, 0.07, 0.19,
+                0.03, 0.14, 0.10,
             ),
             AudioSyncSpeedMode::Medium => (
-                35, 0.18, 0.20, 0.26, 0.16, 0.12, 0.22, 0.12, 0.66, 1.3, 1.6, 3.8, 0.65, 1.85,
-                0.35, 2.4, 0.01, 0.003, 0.92, 1.65, 0.70, 1.08, 0.94, 0.01, 0.20, 0.52, 0.015,
-                0.24, 0.005, 0.18, 0.08,
+                28, 0.26, 0.30, 0.34, 0.24, 0.24, 0.32, 0.12, 0.60, 1.55, 1.95, 5.0, 0.85, 2.35,
+                0.58, 3.1, 0.20, 0.06, 0.76, 1.20, 0.64, 0.96, 0.82, 0.10, 0.26, 0.62, 0.09, 0.28,
+                0.05, 0.24, 0.18,
             ),
             AudioSyncSpeedMode::High => (
-                14, 0.78, 0.82, 0.32, 0.74, 0.42, 0.16, 0.08, 0.58, 1.6, 1.9, 5.2, 0.7, 2.15, 0.4,
-                2.8, 0.02, 0.01, 0.90, 0.78, 0.58, 1.00, 0.88, 0.03, 0.18, 0.60, 0.015, 0.28,
-                0.004, 0.12, 0.12,
+                12, 0.86, 0.90, 0.38, 0.82, 0.46, 0.20, 0.08, 0.54, 1.8, 2.1, 5.8, 0.92, 2.55,
+                0.66, 3.4, 0.24, 0.08, 0.70, 0.92, 0.56, 0.90, 0.76, 0.11, 0.26, 0.66, 0.07, 0.30,
+                0.03, 0.18, 0.24,
             ),
         };
         let brightness_ratio = brightness_ceiling.unwrap_or(100).clamp(1, 100) as f32 / 100.0;
