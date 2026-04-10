@@ -4249,7 +4249,7 @@ checksum = "99b732b2db50b25cfbcb171e1b7abda06e77873aeef493e635eb209482fdd149"
 
 [[package]]
 name = "seasons"
-version = "0.1.0-rc1"
+version = "0.1.0"
 dependencies = [
  "hex",
  "openssl",
@@ -4271,7 +4271,7 @@ dependencies = [
 
 [[package]]
 name = "seasons-ui"
-version = "0.1.0-rc1"
+version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",
