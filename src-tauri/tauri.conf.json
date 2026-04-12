@@ -14,9 +14,9 @@
     "windows": [
       {
         "title": "seasons",
-        "width": 645,
-        "minWidth": 645,
-        "maxWidth": 645,
+        "width": 516,
+        "minWidth": 516,
+        "maxWidth": 516,
         "height": 932
       }
     ],
