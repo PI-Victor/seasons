@@ -14,6 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod about_panel;
 pub mod audio_sync_panel;
 pub mod automation_panel;
 pub mod bridge_panel;
@@ -26,6 +27,7 @@ pub mod scene_composer;
 pub mod status_banner;
 pub mod theme_panel;
 
+pub use about_panel::AboutPanel;
 pub use audio_sync_panel::AudioSyncPanel;
 pub use automation_panel::AutomationPanel;
 pub use bridge_panel::BridgePanel;

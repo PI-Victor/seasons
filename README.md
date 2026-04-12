@@ -1,6 +1,10 @@
 Seasons
 -------
 
+<p align="center">
+  <img src="assets/Seasons-icon.png" alt="Seasons logo" width="160" />
+</p>
+
 An unofficial cross-platform Tauri app for controlling Philips Hue lights, devices, scenes, automations, and Entertainment audio sync.
 
 The project is primarily aimed at Linux, especially for features that are usually better covered by the macOS Hue desktop app.
@@ -25,7 +29,9 @@ Seasons is built around five top-level pages:
 - `Settings` for bridge management, theme selection, and Ollama routing
 - `Audio sync` and `AI control` as collapsible control surfaces on the main page
 
-<img src="assets/Seasons-main.png" alt="Seasons main page" width="70%" />
+<p align="center">
+  <img src="assets/Seasons-main.png" alt="Seasons main page" width="70%" />
+</p>
 
 ## Walkthrough
 
@@ -42,7 +48,9 @@ The room header is meant to be the fast control surface: you can toggle the room
 
 When a room is expanded, Seasons surfaces the full scene strip, scene creation actions, and per-light controls in the same panel so you can stay in the room context while making finer changes.
 
-<img src="assets/Seasons-lights.png" alt="Expanded room view" width="70%" />
+<p align="center">
+  <img src="assets/Seasons-lights.png" alt="Expanded room view" width="70%" />
+</p>
 
 ### Entertainment zones
 
@@ -54,7 +62,9 @@ From there you can:
 - adjust its overall brightness
 - open the card and inspect or control the lights that belong to that zone
 
-<img src="assets/Seasons-zones.png" alt="Entertainment zones section" width="70%" />
+<p align="center">
+  <img src="assets/Seasons-zones.png" alt="Entertainment zones section" width="70%" />
+</p>
 
 ### Devices
 
@@ -67,7 +77,9 @@ Current grouping is:
 - `Switches`
 - `Sensors`
 
-<img src="assets/Seasons-devices.png" alt="Devices page" width="70%" />
+<p align="center">
+  <img src="assets/Seasons-devices.png" alt="Devices page" width="70%" />
+</p>
 
 ### Automations
 
@@ -75,7 +87,9 @@ The `Automations` page lists bridge automations and lets you open them into a de
 
 The app also surfaces the bridge-reported automation type, so the UI reflects what Hue actually exposes instead of inventing its own categories.
 
-<img src="assets/Seasons-automations.png" alt="Automations page" width="70%" />
+<p align="center">
+  <img src="assets/Seasons-automations.png" alt="Automations page" width="70%" />
+</p>
 
 ### Audio sync
 
@@ -91,7 +105,9 @@ To use it:
 
 `Current room` uses the active room palette as the sync color base. Other palettes are available when you want a fixed sync look instead.
 
-<img src="assets/Seasons-sync.png" alt="Audio sync panel" width="70%" />
+<p align="center">
+  <img src="assets/Seasons-sync.png" alt="Audio sync panel" width="70%" />
+</p>
 
 ### AI control
 
@@ -104,7 +120,9 @@ Typical use is direct and local:
 - enter a command on the main page
 - run it against the active bridge
 
-<img src="assets/Seasons-ollama.png" alt="AI control panel" width="70%" />
+<p align="center">
+  <img src="assets/Seasons-ollama.png" alt="AI control panel" width="70%" />
+</p>
 
 ### Settings
 
@@ -118,7 +136,9 @@ Typical use is direct and local:
 
 The app persists its state in platform-appropriate config/data locations instead of browser local storage.
 
-<img src="assets/Seasons-settings.png" alt="Settings page" width="70%" />
+<p align="center">
+  <img src="assets/Seasons-settings.png" alt="Settings page" width="70%" />
+</p>
 
 ## Connect to a Hue bridge
 
