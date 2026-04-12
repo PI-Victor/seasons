@@ -24,6 +24,8 @@ use std::collections::{HashMap, HashSet};
 
 #[component]
 pub fn LightGrid(
+    show_rooms: bool,
+    show_zones: bool,
     lights: ReadSignal<Vec<Light>>,
     groups: ReadSignal<Vec<Group>>,
     scenes: ReadSignal<Vec<Scene>>,
@@ -148,10 +150,12 @@ pub fn LightGrid(
                         .collect::<Vec<_>>();
                     let connection = active_connection.get();
                     view! {
-                        <div class="room-grid">
-                            {room_sections
-                                .into_iter()
-                                .map(|room| {
+                        {if show_rooms {
+                            view! {
+                                <div class="room-grid">
+                                    {room_sections
+                                        .into_iter()
+                                        .map(|room| {
                                     let room_name = room.name.clone();
                                     let room_id = room.id.clone();
                                     let can_craft_scenes = room.can_craft_scenes;
@@ -481,23 +485,28 @@ pub fn LightGrid(
                                             </div>
                                         </details>
                                     }
-                                })
-                                .collect_view()}
-                        </div>
-                        {if zone_sections.is_empty() {
-                            ().into_any()
-                        } else {
-                            view! {
-                                <div id="zones-section" class="panel-header compact-panel-header light-panel-header zone-panel-header">
-                                    <div>
-                                        <p class="panel-kicker">"Zones"</p>
-                                        <h2>"Entertainment zones"</h2>
-                                    </div>
+                                        })
+                                        .collect_view()}
                                 </div>
-                                <div class="room-grid zone-grid">
-                                    {zone_sections
-                                        .into_iter()
-                                        .map(|zone| {
+                            }.into_any()
+                        } else {
+                            ().into_any()
+                        }}
+                        {if show_zones {
+                            if zone_sections.is_empty() {
+                                ().into_any()
+                            } else {
+                                view! {
+                                    <div id="zones-section" class="panel-header compact-panel-header light-panel-header zone-panel-header">
+                                        <div>
+                                            <p class="panel-kicker">"Zones"</p>
+                                            <h2>"Entertainment zones"</h2>
+                                        </div>
+                                    </div>
+                                    <div class="room-grid zone-grid">
+                                        {zone_sections
+                                            .into_iter()
+                                            .map(|zone| {
                                             let zone_id = zone.id.clone();
                                             let zone_name = zone.name.clone();
                                             let zone_status = zone.status.clone();
@@ -618,11 +627,14 @@ pub fn LightGrid(
                                                     </div>
                                                 </details>
                                             }
-                                        })
-                                        .collect_view()}
-                                </div>
+                                            })
+                                            .collect_view()}
+                                    </div>
+                                }
+                                    .into_any()
                             }
-                                .into_any()
+                        } else {
+                            ().into_any()
                         }}
                     }
                     .into_any()

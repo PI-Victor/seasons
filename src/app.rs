@@ -28,8 +28,9 @@ use crate::ollama::{
 use crate::storage::{self, AudioSyncPreferences};
 use crate::theme::{ThemeMode, ThemePalette, ThemePreference, apply_theme_preference};
 use crate::ui::{
-    AudioSyncPanel, AutomationPanel, BridgePanel, CommandPanel, DevicePanel, LightGrid, NoticeTone,
-    NotificationsPanel, OllamaPanel, SceneComposerRequest, ThemePanel, UiNotice, UiToast,
+    AboutPanel, AudioSyncPanel, AutomationPanel, BridgePanel, CommandPanel, DevicePanel, LightGrid,
+    NoticeTone, NotificationsPanel, OllamaPanel, SceneComposerRequest, ThemePanel, UiNotice,
+    UiToast,
 };
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -46,6 +47,14 @@ enum AppPage {
     Settings,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HomePanel {
+    Rooms,
+    Zones,
+    AudioSync,
+    AiControl,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AudioSyncSelection {
     area_id: String,
@@ -59,6 +68,7 @@ struct AudioSyncSelection {
 #[component]
 pub fn App() -> impl IntoView {
     let (page, set_page) = signal(AppPage::Home);
+    let (home_panel, set_home_panel) = signal(HomePanel::Rooms);
     let (discovered_bridges, set_discovered_bridges) = signal(Vec::new());
     let (selected_bridge_ip, set_selected_bridge_ip) = signal(String::new());
     let (username, set_username) = signal(String::new());
@@ -2465,11 +2475,10 @@ pub fn App() -> impl IntoView {
 
             <section class="overview-strip overview-flat">
                 <div class="overview-copy">
-                    <p class="hero-kicker">"Hue Home View"</p>
-                    <h1>"Seasons"</h1>
-                    <p class="hero-text">
-                        "A quieter room-first layout with scenes and lights grouped where they belong."
-                    </p>
+                    <div class="overview-title-row">
+                        <img class="overview-logo" src="public/seasons-logo.png" alt="Seasons logo" />
+                        <h1>"Seasons"</h1>
+                    </div>
                 </div>
 
                 <div class="overview-pills">
@@ -2558,6 +2567,8 @@ pub fn App() -> impl IntoView {
                                 on_timeout_input=set_ollama_timeout
                                 on_save=save_ollama_configuration
                             />
+
+                            <AboutPanel />
                         </section>
                     }.into_any()
                 } else if page.get() == AppPage::Devices {
@@ -2589,75 +2600,169 @@ pub fn App() -> impl IntoView {
                     view! {
                         <section class="workspace-grid home-workspace-grid">
                             <section class="home-jump-links">
-                                <a class="home-jump-link" href="#zones-section">"Zones"</a>
-                                <a class="home-jump-link" href="#audio-sync-section">"Audio sync"</a>
-                                <a class="home-jump-link" href="#ai-control-section">"AI control"</a>
+                                <button
+                                    class=move || {
+                                        if home_panel.get() == HomePanel::Rooms {
+                                            "home-jump-link is-active"
+                                        } else {
+                                            "home-jump-link"
+                                        }
+                                    }
+                                    type="button"
+                                    on:click=move |_| set_home_panel.set(HomePanel::Rooms)
+                                >
+                                    "Rooms"
+                                </button>
+                                <button
+                                    class=move || {
+                                        if home_panel.get() == HomePanel::Zones {
+                                            "home-jump-link is-active"
+                                        } else {
+                                            "home-jump-link"
+                                        }
+                                    }
+                                    type="button"
+                                    on:click=move |_| set_home_panel.set(HomePanel::Zones)
+                                >
+                                    "Zones"
+                                </button>
+                                <button
+                                    class=move || {
+                                        if home_panel.get() == HomePanel::AudioSync {
+                                            "home-jump-link is-active"
+                                        } else {
+                                            "home-jump-link"
+                                        }
+                                    }
+                                    type="button"
+                                    on:click=move |_| set_home_panel.set(HomePanel::AudioSync)
+                                >
+                                    "Audio sync"
+                                </button>
+                                <button
+                                    class=move || {
+                                        if home_panel.get() == HomePanel::AiControl {
+                                            "home-jump-link is-active"
+                                        } else {
+                                            "home-jump-link"
+                                        }
+                                    }
+                                    type="button"
+                                    on:click=move |_| set_home_panel.set(HomePanel::AiControl)
+                                >
+                                    "AI control"
+                                </button>
                             </section>
 
-                            <LightGrid
-                                lights=lights
-                                groups=groups
-                                scenes=scenes
-                                entertainment_areas=entertainment_areas
-                                room_order=room_order
-                                pending_scene_id=pending_scene_id
-                                pending_room_ids=pending_room_ids
-                                pending_room_control_ids=pending_room_control_ids
-                                pending_light_ids=pending_light_ids
-                                active_scene_by_group=active_scene_by_group
-                                audio_sync_preview=audio_sync_preview
-                                syncing_room_ids=syncing_room_ids
-                                active_connection=active_connection
-                                is_refreshing=is_refreshing
-                                on_open_settings=Callback::new(move |_| set_page.set(AppPage::Settings))
-                                on_toggle_all_lights=toggle_all_lights
-                                on_toggle_room=toggle_room
-                                on_set_room_brightness=set_room_brightness
-                                on_toggle_entertainment_area=toggle_entertainment_area
-                                on_set_entertainment_area_brightness=set_entertainment_area_brightness
-                                on_toggle_light=toggle_light
-                                on_set_light_brightness=set_light_brightness
-                                on_activate_scene=activate_scene
-                                on_delete_scene=delete_scene
-                                on_create_curated_scenes=create_curated_room_scenes
-                                on_create_custom_scene=create_custom_room_scene
-                                on_reorder_rooms=reorder_rooms
-                            />
-
-                            <div id="audio-sync-section" class="home-anchor-section">
-                                <AudioSyncPanel
-                                    active_connection=active_connection
-                                    entertainment_areas=entertainment_areas
-                                    selected_entertainment_area_id=selected_entertainment_area_id
-                                    pipewire_targets=pipewire_targets
-                                    selected_pipewire_target_object=selected_pipewire_target_object
-                                    selected_sync_speed_mode=selected_sync_speed_mode
-                                    selected_sync_color_palette=selected_sync_color_palette
-                                    is_loading_areas=is_loading_entertainment_areas
-                                    is_loading_pipewire_targets=is_loading_pipewire_targets
-                                    is_audio_syncing=is_audio_syncing
-                                    is_audio_sync_starting=is_audio_sync_starting
-                                    on_select_area=select_entertainment_area
-                                    on_select_pipewire_target=select_pipewire_target
-                                    on_select_sync_speed_mode=select_sync_speed_mode
-                                    on_select_sync_color_palette=select_sync_color_palette
-                                    on_start=start_audio_sync
-                                    on_stop=stop_audio_sync
-                                />
-                            </div>
-
-                            <div id="ai-control-section" class="home-anchor-section">
-                                <CommandPanel
-                                    active_connection=active_connection
-                                    ollama_connection_ok=ollama_connection_ok
-                                    is_checking_connection=is_checking_ollama_connection
-                                    command_input=ollama_command_input
-                                    is_executing=is_running_ollama_command
-                                    last_result=ollama_result
-                                    on_input=Callback::new(move |value: String| set_ollama_command_input.set(value))
-                                    on_execute=execute_ollama_instruction
-                                />
-                            </div>
+                            {move || match home_panel.get() {
+                                HomePanel::Rooms => {
+                                    view! {
+                                        <LightGrid
+                                            show_rooms=true
+                                            show_zones=false
+                                            lights=lights
+                                            groups=groups
+                                            scenes=scenes
+                                            entertainment_areas=entertainment_areas
+                                            room_order=room_order
+                                            pending_scene_id=pending_scene_id
+                                            pending_room_ids=pending_room_ids
+                                            pending_room_control_ids=pending_room_control_ids
+                                            pending_light_ids=pending_light_ids
+                                            active_scene_by_group=active_scene_by_group
+                                            audio_sync_preview=audio_sync_preview
+                                            syncing_room_ids=syncing_room_ids
+                                            active_connection=active_connection
+                                            is_refreshing=is_refreshing
+                                            on_open_settings=Callback::new(move |_| set_page.set(AppPage::Settings))
+                                            on_toggle_all_lights=toggle_all_lights
+                                            on_toggle_room=toggle_room
+                                            on_set_room_brightness=set_room_brightness
+                                            on_toggle_entertainment_area=toggle_entertainment_area
+                                            on_set_entertainment_area_brightness=set_entertainment_area_brightness
+                                            on_toggle_light=toggle_light
+                                            on_set_light_brightness=set_light_brightness
+                                            on_activate_scene=activate_scene
+                                            on_delete_scene=delete_scene
+                                            on_create_curated_scenes=create_curated_room_scenes
+                                            on_create_custom_scene=create_custom_room_scene
+                                            on_reorder_rooms=reorder_rooms
+                                        />
+                                    }.into_any()
+                                }
+                                HomePanel::Zones => {
+                                    view! {
+                                        <LightGrid
+                                            show_rooms=false
+                                            show_zones=true
+                                            lights=lights
+                                            groups=groups
+                                            scenes=scenes
+                                            entertainment_areas=entertainment_areas
+                                            room_order=room_order
+                                            pending_scene_id=pending_scene_id
+                                            pending_room_ids=pending_room_ids
+                                            pending_room_control_ids=pending_room_control_ids
+                                            pending_light_ids=pending_light_ids
+                                            active_scene_by_group=active_scene_by_group
+                                            audio_sync_preview=audio_sync_preview
+                                            syncing_room_ids=syncing_room_ids
+                                            active_connection=active_connection
+                                            is_refreshing=is_refreshing
+                                            on_open_settings=Callback::new(move |_| set_page.set(AppPage::Settings))
+                                            on_toggle_all_lights=toggle_all_lights
+                                            on_toggle_room=toggle_room
+                                            on_set_room_brightness=set_room_brightness
+                                            on_toggle_entertainment_area=toggle_entertainment_area
+                                            on_set_entertainment_area_brightness=set_entertainment_area_brightness
+                                            on_toggle_light=toggle_light
+                                            on_set_light_brightness=set_light_brightness
+                                            on_activate_scene=activate_scene
+                                            on_delete_scene=delete_scene
+                                            on_create_curated_scenes=create_curated_room_scenes
+                                            on_create_custom_scene=create_custom_room_scene
+                                            on_reorder_rooms=reorder_rooms
+                                        />
+                                    }.into_any()
+                                }
+                                HomePanel::AudioSync => {
+                                    view! {
+                                        <AudioSyncPanel
+                                            active_connection=active_connection
+                                            entertainment_areas=entertainment_areas
+                                            selected_entertainment_area_id=selected_entertainment_area_id
+                                            pipewire_targets=pipewire_targets
+                                            selected_pipewire_target_object=selected_pipewire_target_object
+                                            selected_sync_speed_mode=selected_sync_speed_mode
+                                            selected_sync_color_palette=selected_sync_color_palette
+                                            is_loading_areas=is_loading_entertainment_areas
+                                            is_loading_pipewire_targets=is_loading_pipewire_targets
+                                            is_audio_syncing=is_audio_syncing
+                                            is_audio_sync_starting=is_audio_sync_starting
+                                            on_select_area=select_entertainment_area
+                                            on_select_pipewire_target=select_pipewire_target
+                                            on_select_sync_speed_mode=select_sync_speed_mode
+                                            on_select_sync_color_palette=select_sync_color_palette
+                                            on_start=start_audio_sync
+                                            on_stop=stop_audio_sync
+                                        />
+                                    }.into_any()
+                                }
+                                HomePanel::AiControl => {
+                                    view! {
+                                        <CommandPanel
+                                            active_connection=active_connection
+                                            ollama_connection_ok=ollama_connection_ok
+                                            is_checking_connection=is_checking_ollama_connection
+                                            command_input=ollama_command_input
+                                            is_executing=is_running_ollama_command
+                                            last_result=ollama_result
+                                            on_input=Callback::new(move |value: String| set_ollama_command_input.set(value))
+                                            on_execute=execute_ollama_instruction
+                                        />
+                                    }.into_any()
+                                }
+                            }}
                         </section>
                     }.into_any()
                 }
@@ -2673,6 +2778,8 @@ pub fn App() -> impl IntoView {
                                 "ghost-button nav-button"
                             }
                         }
+                        aria-label="Rooms"
+                        data-popover="Rooms"
                         on:click=move |_| set_page.set(AppPage::Home)
                     >
                         <span class="nav-button-content">
@@ -2688,6 +2795,8 @@ pub fn App() -> impl IntoView {
                                 "ghost-button nav-button"
                             }
                         }
+                        aria-label="Devices"
+                        data-popover="Devices"
                         on:click=move |_| set_page.set(AppPage::Devices)
                     >
                         <span class="nav-button-content">
@@ -2703,6 +2812,8 @@ pub fn App() -> impl IntoView {
                                 "ghost-button nav-button"
                             }
                         }
+                        aria-label="Automations"
+                        data-popover="Automations"
                         on:click=move |_| set_page.set(AppPage::Automations)
                     >
                         <span class="nav-button-content">
@@ -2718,6 +2829,8 @@ pub fn App() -> impl IntoView {
                                 "ghost-button nav-button"
                             }
                         }
+                        aria-label="Settings"
+                        data-popover="Settings"
                         on:click=move |_| set_page.set(AppPage::Settings)
                     >
                         <span class="nav-button-content">
@@ -2727,6 +2840,8 @@ pub fn App() -> impl IntoView {
                     </button>
                     <button
                         class="ghost-button quit-button"
+                        aria-label="Quit"
+                        data-popover="Quit"
                         on:click=move |_| quit_application.run(())
                     >
                         <span class="nav-button-content">
