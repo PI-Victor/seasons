@@ -25,6 +25,7 @@ pub enum ThemePalette {
     Catppuccin,
     Everforest,
     RosePine,
+    Seasons,
     Dayfox,
     Synthwave,
 }

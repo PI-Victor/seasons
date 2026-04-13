@@ -41,32 +41,29 @@ pub fn AudioSyncPanel(
     on_stop: Callback<()>,
 ) -> impl IntoView {
     view! {
-        <details class="audio-sync-panel surface-panel">
-            <summary class="audio-sync-summary">
-                <div class="settings-header">
-                    <div>
-                        <p class="panel-kicker">"Entertainment"</p>
-                        <h2>"Audio sync"</h2>
-                    </div>
-                    <div class="audio-sync-summary-meta">
-                        <div class="connection-pulse">
-                            <span class="connection-pulse-dot"></span>
-                            <span>
-                                {move || {
-                                    if is_audio_syncing.get() {
-                                        "Live streaming to Hue".to_string()
-                                    } else if is_audio_sync_starting.get() {
-                                        "Starting stream...".to_string()
-                                    } else {
-                                        "Idle".to_string()
-                                    }
-                                }}
-                            </span>
-                        </div>
-                        <span class="audio-sync-summary-toggle">"Open"</span>
+        <section class="audio-sync-panel">
+            <div class="settings-header">
+                <div>
+                    <p class="panel-kicker">"Entertainment"</p>
+                    <h2>"Audio sync"</h2>
+                </div>
+                <div class="audio-sync-summary-meta">
+                    <div class="connection-pulse">
+                        <span class="connection-pulse-dot"></span>
+                        <span>
+                            {move || {
+                                if is_audio_syncing.get() {
+                                    "Live streaming to Hue".to_string()
+                                } else if is_audio_sync_starting.get() {
+                                    "Starting stream...".to_string()
+                                } else {
+                                    "Idle".to_string()
+                                }
+                            }}
+                        </span>
                     </div>
                 </div>
-            </summary>
+            </div>
 
             <div class="audio-sync-body">
                 <p class="panel-copy">
@@ -207,7 +204,7 @@ pub fn AudioSyncPanel(
                     </button>
                 </div>
             </div>
-        </details>
+        </section>
     }
 }
 

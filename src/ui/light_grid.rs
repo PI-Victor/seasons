@@ -79,32 +79,38 @@ pub fn LightGrid(
                 set_drop_target_room_id.set(None);
             }
         >
-            <div class="panel-header compact-panel-header light-panel-header">
-                <div>
-                    <p class="panel-kicker">"Rooms"</p>
-                    <h2>"Main residence"</h2>
-                </div>
-                <div class="light-panel-actions">
-                    <button
-                        class=move || {
-                            if home_active_count.get() > 0 {
-                                "home-master-switch is-on"
-                            } else {
-                                "home-master-switch"
-                            }
-                        }
-                        disabled=move || is_refreshing.get() || is_updating_home.get() || home_light_count.get() == 0
-                        on:click=move |_| on_toggle_all_lights.run(())
-                    >
-                        <span class="home-master-switch-label">
-                            {move || if home_active_count.get() > 0 { "All on" } else { "All off" }}
-                        </span>
-                        <span class="home-master-switch-track">
-                            <span class="home-master-switch-thumb"></span>
-                        </span>
-                    </button>
-                </div>
-            </div>
+            {if show_rooms {
+                view! {
+                    <div class="panel-header compact-panel-header light-panel-header">
+                        <div>
+                            <p class="panel-kicker">"Rooms"</p>
+                            <h2>"Main residence"</h2>
+                        </div>
+                        <div class="light-panel-actions">
+                            <button
+                                class=move || {
+                                    if home_active_count.get() > 0 {
+                                        "home-master-switch is-on"
+                                    } else {
+                                        "home-master-switch"
+                                    }
+                                }
+                                disabled=move || is_refreshing.get() || is_updating_home.get() || home_light_count.get() == 0
+                                on:click=move |_| on_toggle_all_lights.run(())
+                            >
+                                <span class="home-master-switch-label">
+                                    {move || if home_active_count.get() > 0 { "All on" } else { "All off" }}
+                                </span>
+                                <span class="home-master-switch-track">
+                                    <span class="home-master-switch-thumb"></span>
+                                </span>
+                            </button>
+                        </div>
+                    </div>
+                }.into_any()
+            } else {
+                ().into_any()
+            }}
 
             {move || {
                 if active_connection.get().is_none() {
@@ -501,6 +507,26 @@ pub fn LightGrid(
                                         <div>
                                             <p class="panel-kicker">"Zones"</p>
                                             <h2>"Entertainment zones"</h2>
+                                        </div>
+                                        <div class="light-panel-actions">
+                                            <button
+                                                class=move || {
+                                                    if home_active_count.get() > 0 {
+                                                        "home-master-switch is-on"
+                                                    } else {
+                                                        "home-master-switch"
+                                                    }
+                                                }
+                                                disabled=move || is_refreshing.get() || is_updating_home.get() || home_light_count.get() == 0
+                                                on:click=move |_| on_toggle_all_lights.run(())
+                                            >
+                                                <span class="home-master-switch-label">
+                                                    {move || if home_active_count.get() > 0 { "All on" } else { "All off" }}
+                                                </span>
+                                                <span class="home-master-switch-track">
+                                                    <span class="home-master-switch-thumb"></span>
+                                                </span>
+                                            </button>
                                         </div>
                                     </div>
                                     <div class="room-grid zone-grid">

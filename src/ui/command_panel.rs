@@ -30,42 +30,39 @@ pub fn CommandPanel(
     on_execute: Callback<()>,
 ) -> impl IntoView {
     view! {
-        <details class="command-panel surface-panel">
-            <summary class="command-summary">
-                <div class="settings-header">
-                    <div>
-                        <p class="panel-kicker">"Command"</p>
-                        <h2>"AI control"</h2>
-                    </div>
-                    <div class="audio-sync-summary-meta">
-                        <div class="connection-pulse">
-                            <span
-                                class=move || {
-                                    if is_checking_connection.get() {
-                                        "connection-pulse-dot is-checking"
-                                    } else if ollama_connection_ok.get().unwrap_or(false) {
-                                        "connection-pulse-dot"
-                                    } else {
-                                        "connection-pulse-dot is-offline"
-                                    }
+        <section class="command-panel">
+            <div class="settings-header">
+                <div>
+                    <p class="panel-kicker">"Command"</p>
+                    <h2>"AI control"</h2>
+                </div>
+                <div class="audio-sync-summary-meta">
+                    <div class="connection-pulse">
+                        <span
+                            class=move || {
+                                if is_checking_connection.get() {
+                                    "connection-pulse-dot is-checking"
+                                } else if ollama_connection_ok.get().unwrap_or(false) {
+                                    "connection-pulse-dot"
+                                } else {
+                                    "connection-pulse-dot is-offline"
                                 }
-                            ></span>
-                            <span>
-                                {move || {
-                                    if is_checking_connection.get() {
-                                        "Checking AI".to_string()
-                                    } else if ollama_connection_ok.get().unwrap_or(false) {
-                                        "AI online".to_string()
-                                    } else {
-                                        "AI offline".to_string()
-                                    }
-                                }}
-                            </span>
-                        </div>
-                        <span class="audio-sync-summary-toggle">"Open"</span>
+                            }
+                        ></span>
+                        <span>
+                            {move || {
+                                if is_checking_connection.get() {
+                                    "Checking AI".to_string()
+                                } else if ollama_connection_ok.get().unwrap_or(false) {
+                                    "AI online".to_string()
+                                } else {
+                                    "AI offline".to_string()
+                                }
+                            }}
+                        </span>
                     </div>
                 </div>
-            </summary>
+            </div>
 
             <div class="command-body">
                 <p class="panel-copy">
@@ -137,6 +134,6 @@ pub fn CommandPanel(
                     }}
                 </Show>
             </div>
-        </details>
+        </section>
     }
 }
